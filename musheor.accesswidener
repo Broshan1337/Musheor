@@ -1,0 +1,6 @@
+accessWidener	v2	intermediary
+accessible	method	net/minecraft/class_636	method_41931	(Lnet/minecraft/class_638;Lnet/minecraft/class_7204;)V
+accessible	field	net/minecraft/class_355	field_2156	Ljava/util/Comparator;
+accessible	field	net/minecraft/class_1661	field_7547	Lnet/minecraft/class_2371;
+accessible	field	net/minecraft/class_1661	field_7545	I
+mutable	field	net/minecraft/class_1661	field_7545	I
