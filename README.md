@@ -1,7 +1,7 @@
 The main developer of this goyim software uses the GPL-3.0 License, yet he obfuscates his releases.... code is also nowhere available so here we go!
 I've decompiled and deobfuscated most stuff I could so you guys could understand what it does, keep it all open source mr musheck!
 
-
+Requirement: be able to see and read.
 
 
 # Musheor
