@@ -1,3 +1,9 @@
+The main developer of this goyim software uses the GPL-3.0 License, yet he obfuscates his releases.... code is also nowhere available so here we go!
+I've decompiled and deobfuscated most stuff I could so you guys could understand what it does, keep it all open source mr musheck!
+
+
+
+
 # Musheor
 > A Meteor Client addon for Minecraft 1.21+ focused on highway building automation, utility modules, and hunting tools. Supports multiple Minecraft versions (1.21.4, 1.21.5, 1.21.11).
 ## Modules
@@ -157,4 +163,3 @@ Accessible via the Musheor tab in Meteor Client's settings.
 - [MaLiLib](https://github.com/maruohon/malilib) (Litematica dependency)
 
 
-The main developer of this goyim software uses the GPL-3.0 License, yet he obfuscates his releases.... code is also nowhere available so here we go!
