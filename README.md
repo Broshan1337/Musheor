@@ -4,6 +4,9 @@ The FSF granted "the use of any mechanism available to you for obtaining complet
 
 If you have a better idea on how to do this please do a pull request or an issue.
 
+
+I will be updating this and some files as I keep re trying to deobfuscate them later
+
 Requirement: be able to see and read.
  Warning, you cannot build this code as it's like half broken and decompiled + deobfuscated from the jar file provided by the developer
 
