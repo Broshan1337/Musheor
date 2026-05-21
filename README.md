@@ -1,5 +1,8 @@
 The main developer of this goyim software uses the GPL-3.0 License, yet he obfuscates his releases.... code is also nowhere available so here we go!
 I've decompiled and deobfuscated most stuff I could so you guys could understand what it does, keep it all open source mr musheck!
+The FSF granted "the use of any mechanism available to you for obtaining complete and corresponding source code, as is the right of users, and enforcing full compliance with the GNU GPL."
+
+If you have a better idea on how to do this please do a pull request or an issue.
 
 Requirement: be able to see and read.
 
