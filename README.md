@@ -5,7 +5,7 @@ The FSF granted "the use of any mechanism available to you for obtaining complet
 If you have a better idea on how to do this please do a pull request or an issue.
 
 Requirement: be able to see and read.
-
+ Warning, you cannot build this code as it's like half broken and decompiled + deobfuscated from the jar file provided by the developer
 
 # Musheor
 > A Meteor Client addon for Minecraft 1.21+ focused on highway building automation, utility modules, and hunting tools. Supports multiple Minecraft versions (1.21.4, 1.21.5, 1.21.11).
