@@ -21,19 +21,18 @@ import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import musheor.compat.LitematicaHelper;
 import musheor.compat.VersionHelper;
 import musheor.utils.WorldUtils;
-import net.minecraft.FluidBlock;
-import net.minecraft.Block;
-import net.minecraft.BlockPos;
-import net.minecraft.BlockPos;
-import net.minecraft.BlockState;
-import net.minecraft.MinecraftClient;
+import net.minecraft.block.Block;
+import net.minecraft.block.FluidBlock;
+import net.minecraft.block.BlockState;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.util.math.BlockPos;
 
 public class LitematicaHelperImpl
 implements LitematicaHelper {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
 
     private static File getSchematicsDirectory() {
-        return new File(LitematicaHelperImpl.mc.field_1697, "schematics");
+        return new File(LitematicaHelperImpl.mc.runDirectory, "schematics"); // was: field_1697
     }
 
     private static File findSchematicByName(String string) {
@@ -209,8 +208,8 @@ implements LitematicaHelper {
         if (LitematicaHelperImpl.mc.world == null) {
             return null;
         }
-        BlockPos BlockPos3 = BlockPos2.method_10069(-n, -n, -n);
-        BlockPos BlockPos4 = BlockPos2.method_10069(n, n, n);
+        BlockPos BlockPos3 = BlockPos2.add(-n, -n, -n); // was: method_10069(-n, -n, -n)
+        BlockPos BlockPos4 = BlockPos2.add(n, n, n);    // was: method_10069(n, n, n)
         BlockPos BlockPos5 = null;
         double d = Double.MAX_VALUE;
         for (SchematicPlacement schematicPlacement : DataManager.getSchematicPlacementManager().getAllSchematicsPlacements()) {
@@ -236,7 +235,7 @@ implements LitematicaHelper {
                             BlockState BlockState2 = worldSchematic.getBlockState(BlockPos8);
                             if (BlockState2 == null || BlockState2.isAir() || list != null && list.contains(BlockState2.getBlock())) continue;
                             BlockState BlockState3 = LitematicaHelperImpl.mc.world.getBlockState(BlockPos8);
-                            if ((!bl ? BlockState3.getBlock() == BlockState2.getBlock() : !(BlockState3.getBlock() instanceof FluidBlock)) || !((d2 = BlockPos2.method_10262((BlockPos)BlockPos8)) < d)) continue;
+                            if ((!bl ? BlockState3.getBlock() == BlockState2.getBlock() : !(BlockState3.getBlock() instanceof FluidBlock)) || !((d2 = BlockPos2.getSquaredDistance((BlockPos)BlockPos8)) < d)) continue; // was: method_10262
                             d = d2;
                             BlockPos5 = BlockPos8;
                         }
@@ -310,7 +309,7 @@ implements LitematicaHelper {
                             BlockPos BlockPos4 = new BlockPos(i, j, k);
                             BlockState BlockState2 = worldSchematic.getBlockState(BlockPos4);
                             BlockState BlockState3 = LitematicaHelperImpl.mc.world.getBlockState(BlockPos4);
-                            if (BlockState3.isAir() || bl && BlockState2.isAir() || BlockState2 == BlockState3 || !WorldUtils.jOdDDFXSeWl4(BlockPos4, d)) continue;
+                            if (BlockState3.isAir() || bl && BlockState2.isAir() || BlockState2 == BlockState3 || !WorldUtils.jOdDDFXSeWl4(BlockPos4, d)) continue; // TODO: jOdDDFXSeWl4(BlockPos,double) — different overload from cleanPlacementCache; resolve when WorldUtils.java is deobfuscated
                             arrayList.add(BlockPos4);
                         }
                     }
@@ -320,4 +319,3 @@ implements LitematicaHelper {
         return arrayList;
     }
 }
-

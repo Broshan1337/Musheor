@@ -18,28 +18,29 @@ import meteordevelopment.meteorclient.mixin.ContainerComponentAccessor;
 import meteordevelopment.meteorclient.renderer.Renderer2D;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import musheor.compat.VersionHelper;
-import net.minecraft.SkinTextures;
-import net.minecraft.class_1043;
-import net.minecraft.class_1044;
-import net.minecraft.class_10938;
-import net.minecraft.class_12137;
-import net.minecraft.InteractionHand;
-import net.minecraft.Entity;
-import net.minecraft.ClientPlayerEntity;
-import net.minecraft.ItemStack;
-import net.minecraft.DefaultedList;
-import net.minecraft.Vec3d;
-import net.minecraft.NbtCompound;
-import net.minecraft.NbtList;
-import net.minecraft.Packet;
-import net.minecraft.class_2813;
-import net.minecraft.class_2824;
-import net.minecraft.Identifier;
-import net.minecraft.MinecraftClient;
-import net.minecraft.SoundEvent;
-import net.minecraft.class_3489;
-import net.minecraft.PlayerListEntry;
-import net.minecraft.MutableText;
+import net.minecraft.entity.player.SkinTextures;
+import net.minecraft.client.texture.NativeImageBackedTexture;
+import net.minecraft.client.texture.AbstractTexture;
+import net.minecraft.screen.sync.ItemStackHash;
+import net.minecraft.client.gl.GpuSampler;
+import net.minecraft.util.Hand;
+import net.minecraft.entity.Entity;
+import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.item.ItemStack;
+import net.minecraft.util.collection.DefaultedList;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.nbt.NbtCompound;
+import net.minecraft.nbt.NbtList;
+import net.minecraft.network.packet.Packet;
+import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
+import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
+import net.minecraft.util.Identifier;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.sound.SoundEvent;
+import net.minecraft.registry.tag.ItemTags;
+import net.minecraft.client.network.PlayerListEntry;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.screen.slot.SlotActionType;
 import org.lwjgl.glfw.GLFW;
 
 public class VersionHelperImpl
@@ -58,22 +59,22 @@ implements VersionHelper {
 
     @Override
     public Vec3d getPlayerPos() {
-        return VersionHelperImpl.mc.player.method_73189();
+        return VersionHelperImpl.mc.player.getEntityPos();
     }
 
     @Override
-    public void playSoundPlayer(SoundEvent SoundEvent2) {
-        VersionHelperImpl.mc.player.method_5783(SoundEvent2, 1.0f, 1.0f);
+    public void playSoundPlayer(SoundEvent soundEvent) {
+        VersionHelperImpl.mc.player.playSound(soundEvent, 1.0f, 1.0f);
     }
 
     @Override
-    public boolean isPickaxe(ItemStack ItemStack2) {
-        return ItemStack2.method_31573(class_3489.field_42614);
+    public boolean isPickaxe(ItemStack stack) {
+        return stack.isIn(ItemTags.PICKAXES);
     }
 
     @Override
-    public boolean isTool(ItemStack ItemStack2) {
-        return ItemStack2.method_57353().method_57832(MutableText.field_50077);
+    public boolean isTool(ItemStack stack) {
+        return stack.getComponents().contains(DataComponentTypes.TOOL);
     }
 
     @Override
@@ -82,13 +83,13 @@ implements VersionHelper {
     }
 
     @Override
-    public NbtCompound getCompound(NbtCompound NbtCompound2, String string) {
-        return NbtCompound2.method_68568(string);
+    public NbtCompound getCompound(NbtCompound nbt, String key) {
+        return nbt.getCompoundOrEmpty(key);
     }
 
     @Override
-    public NbtList getList(NbtCompound NbtCompound2, String string, int n) {
-        return NbtCompound2.method_10554(string).orElse(new NbtList());
+    public NbtList getList(NbtCompound nbt, String key, int type) {
+        return nbt.getList(key).orElse(new NbtList());
     }
 
     @Override
@@ -97,46 +98,53 @@ implements VersionHelper {
     }
 
     @Override
-    public UUID getUUID(PlayerListEntry PlayerListEntry2) {
-        return PlayerListEntry2.getProfile().id();
+    public UUID getUUID(PlayerListEntry entry) {
+        return entry.getProfile().id();
     }
 
-    public LitematicaSchematic getSchematicFromFile(File file, String string) {
-        return LitematicaSchematic.createFromFile((Path)file.getParentFile().toPath(), (String)string, (FileType)FileType.fromFile((File)file));
+    public LitematicaSchematic getSchematicFromFile(File file, String name) {
+        return LitematicaSchematic.createFromFile((Path) file.getParentFile().toPath(), (String) name, (FileType) FileType.fromFile((File) file));
     }
 
     @Override
-    public boolean onSameServer(String string) {
-        return mc.getNetworkHandler() != null && mc.getNetworkHandler().getPlayerList().stream().anyMatch(PlayerListEntry2 -> PlayerListEntry2.getProfile().name().equalsIgnoreCase(string));
+    public boolean onSameServer(String playerName) {
+        return mc.getNetworkHandler() != null && mc.getNetworkHandler().getPlayerList().stream()
+            .anyMatch(e -> e.getProfile().name().equalsIgnoreCase(playerName));
     }
 
     @Override
     public void syncInventory() {
-        if (VersionHelperImpl.mc.player == null || VersionHelperImpl.mc.field_1761 == null) {
+        if (VersionHelperImpl.mc.player == null || VersionHelperImpl.mc.interactionManager == null) {
             return;
         }
-        mc.getNetworkHandler().method_52787((Packet)new class_2813(VersionHelperImpl.mc.player.field_7512.field_7763, Integer.MAX_VALUE, 0, 3, ClientPlayerEntity.field_7790, Int2ObjectMaps.emptyMap(), class_10938.field_58176));
+        mc.getNetworkHandler().sendPacket((Packet) new ClickSlotC2SPacket(
+            VersionHelperImpl.mc.player.currentScreenHandler.syncId,
+            Integer.MAX_VALUE, 0, 3,
+            SlotActionType.PICKUP,
+            Int2ObjectMaps.emptyMap(),
+            ItemStackHash.EMPTY));
     }
 
     @Override
-    public void interactEntityAt(Entity Entity2, InteractionHand InteractionHand2) {
-        VersionHelperImpl.mc.field_1761.method_41931(VersionHelperImpl.mc.world, n -> class_2824.method_34208((Entity)Entity2, (boolean)false, (InteractionHand)InteractionHand2, (Vec3d)Entity2.method_73189()));
+    public void interactEntityAt(Entity entity, Hand hand) {
+        VersionHelperImpl.mc.interactionManager.sendSequencedPacket(VersionHelperImpl.mc.world,
+            n -> PlayerInteractEntityC2SPacket.interactAt((Entity) entity, (boolean) false, (Hand) hand, (Vec3d) entity.getEntityPos()));
     }
 
     @Override
-    public String getString(NbtCompound NbtCompound2, String string) {
-        return NbtCompound2.method_10558(string).orElse("");
+    public String getString(NbtCompound nbt, String key) {
+        return nbt.getString(key).orElse("");
     }
 
     @Override
-    public int getInt(NbtCompound NbtCompound2, String string, int n) {
-        return NbtCompound2.method_10550(string).orElse(n);
+    public int getInt(NbtCompound nbt, String key, int defaultValue) {
+        return nbt.getInt(key).orElse(defaultValue);
     }
 
     @Override
     public boolean hasControlDown() {
-        long l = mc.method_22683().method_4490();
-        return GLFW.glfwGetKey((long)l, (int)341) == 1 || GLFW.glfwGetKey((long)l, (int)345) == 1;
+        long handle = mc.getWindow().getHandle();
+        return GLFW.glfwGetKey((long) handle, (int) 341) == 1 || GLFW.glfwGetKey((long) handle, (int) 345) == 1;
     }
 
     @Override
@@ -145,34 +153,34 @@ implements VersionHelper {
     }
 
     @Override
-    public void sendCommand(String string) {
+    public void sendCommand(String command) {
         if (VersionHelperImpl.mc.player == null || mc.getNetworkHandler() == null) {
             return;
         }
-        mc.getNetworkHandler().method_45730(string);
+        mc.getNetworkHandler().sendChatCommand(command);
     }
 
     @Override
-    public void registerSkinTexture(SkinTextures SkinTextures2, String string, Identifier Identifier2) {
-        class_1043 class_10432 = new class_1043(() -> string, SkinTextures2);
-        mc.method_1531().method_4616(Identifier2, (class_1044)class_10432);
-        class_10432.method_4524();
+    public void registerSkinTexture(SkinTextures skinTextures, String data, Identifier id) {
+        NativeImageBackedTexture nativeTexture = new NativeImageBackedTexture(() -> data, skinTextures);
+        mc.getTextureManager().registerTexture(id, (AbstractTexture) nativeTexture);
+        nativeTexture.upload();
     }
 
     @Override
-    public void drawSkinTexture(Identifier Identifier2, float f, float f2, float f3, float f4) {
-        class_1044 class_10442 = mc.method_1531().method_4619(Identifier2);
-        if (class_10442 == null) {
+    public void drawSkinTexture(Identifier id, float x, float y, float width, float height) {
+        AbstractTexture texture = mc.getTextureManager().getTexture(id);
+        if (texture == null) {
             return;
         }
-        GpuTextureView gpuTextureView = class_10442.method_71659();
+        GpuTextureView gpuTextureView = texture.getGlTextureView();
         if (gpuTextureView == null) {
             return;
         }
-        class_12137 class_121372 = RenderSystem.getSamplerCache().method_75294(FilterMode.NEAREST);
+        GpuSampler sampler = RenderSystem.getSamplerCache().get(FilterMode.NEAREST);
         Renderer2D.TEXTURE.begin();
-        Renderer2D.TEXTURE.texQuad((double)f, (double)f2, (double)f3, (double)f4, Color.WHITE);
-        Renderer2D.TEXTURE.render(gpuTextureView, class_121372);
+        Renderer2D.TEXTURE.texQuad((double) x, (double) y, (double) width, (double) height, Color.WHITE);
+        Renderer2D.TEXTURE.render(gpuTextureView, sampler);
     }
 
     @Override
@@ -180,4 +188,3 @@ implements VersionHelper {
         Renderer2D.COLOR.render();
     }
 }
-

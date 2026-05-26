@@ -5,8 +5,8 @@ import java.util.Comparator;
 import java.util.List;
 import musheor.compat.XearoHelper;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.Vec3d;
-import net.minecraft.MinecraftClient;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.client.MinecraftClient;
 import xaero.common.minimap.waypoints.Waypoint;
 import xaero.hud.minimap.BuiltInHudModules;
 import xaero.hud.minimap.module.MinimapSession;
@@ -170,7 +170,7 @@ implements XearoHelper {
         }
         List<Line> list2 = list.stream().map(lineData -> new Line(lineData.x1(), lineData.z1(), lineData.x2(), lineData.z2())).toList();
         Globals.drawManager.registry().unregister(string);
-        Globals.drawManager.registry().register(DrawFeatureFactory.lines((String)string, (n, n2, n3, class_53212) -> list2, () -> n4, () -> 1.0f, (int)50));
+        Globals.drawManager.registry().register(DrawFeatureFactory.lines((String)string, (n, n2, n3, ignored) -> list2, () -> n4, () -> 1.0f, (int)50));
     }
 
     @Override
