@@ -11,8 +11,8 @@ import meteordevelopment.meteorclient.utils.misc.ISerializable;
 import meteordevelopment.meteorclient.utils.misc.NbtUtils;
 import musheor.compat.VersionHelper;
 import musheor.utils.hud.screen.CustomButtonManagerScreen;
-import net.minecraft.MinecraftClient;  // MinecraftClient
-import net.minecraft.class_437;  // Screen
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.Screen;
 
 /**
  * Adds a "Musheor" tab to Meteor's GUI tab bar.
@@ -32,7 +32,7 @@ public class MusheorTab extends Tab {
     }
 
     @Override
-    public boolean isScreen(class_437 screen) { // Screen
+    public boolean isScreen(Screen screen) {
         return screen instanceof MusheorScreen;
     }
 
@@ -46,13 +46,13 @@ public class MusheorTab extends Tab {
             this.add(this.theme.settings(MusheorSystem.get().getSettings())).expandX();
             if (VersionHelper.get().supportsHudButtons()) {
                 ((WButton) this.add((WWidget) this.theme.button("Custom HUD Buttons")).widget()).action =
-                    () -> MinecraftClient.method_1551().method_1507( // MinecraftClient.getInstance().setScreen()
-                        (class_437) new CustomButtonManagerScreen(MinecraftClient.method_1551().field_1755)); // currentScreen
+                    () -> MinecraftClient.getInstance().setScreen(
+                        (Screen) new CustomButtonManagerScreen(MinecraftClient.getInstance().currentScreen));
             }
         }
 
         @Override
-        public void method_25393() { // tick / render (intermediary name)
+        public void tick() { // was: method_25393
             if (MusheorSystem.Manager.update) {
                 MusheorSystem.Manager.update = false;
                 this.reload();

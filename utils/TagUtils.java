@@ -4,12 +4,12 @@ package musheor.utils;
 import java.util.ArrayList;
 import java.util.List;
 import meteordevelopment.meteorclient.systems.friends.Friends;
-import net.minecraft.class_1297;   // Entity
-import net.minecraft.class_1304;   // EquipmentSlot
-import net.minecraft.class_1657;   // PlayerEntity
-import net.minecraft.ItemStack;   // ItemStack
-import net.minecraft.MinecraftClient;    // MinecraftClient
-import net.minecraft.class_3532;   // MathHelper
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.EquipmentSlot;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.ItemStack;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.util.math.MathHelper;
 
 /**
  * Utility methods for player entity display:
@@ -21,34 +21,34 @@ public class TagUtils {
      * Returns a list of the player's 4 armor stacks in slot order:
      * [HEAD, CHEST, LEGS, FEET].
      */
-    public static List<ItemStack> getArmorStacks(class_1657 player) { // was: jOdDDFXSeWl4(PlayerEntity)
+    public static List<ItemStack> getArmorStacks(PlayerEntity player) { // was: jOdDDFXSeWl4(PlayerEntity)
         ArrayList<ItemStack> stacks = new ArrayList<ItemStack>();
-        stacks.add(player.method_6118(class_1304.field_6169)); // getEquippedStack(HEAD)
-        stacks.add(player.method_6118(class_1304.field_6174)); // getEquippedStack(CHEST)
-        stacks.add(player.method_6118(class_1304.field_6172)); // getEquippedStack(LEGS)
-        stacks.add(player.method_6118(class_1304.field_6166)); // getEquippedStack(FEET)
+        stacks.add(player.getEquippedStack(EquipmentSlot.HEAD));
+        stacks.add(player.getEquippedStack(EquipmentSlot.CHEST));
+        stacks.add(player.getEquippedStack(EquipmentSlot.LEGS));
+        stacks.add(player.getEquippedStack(EquipmentSlot.FEET));
         return stacks;
     }
 
     /** Returns the player's main-hand ItemStack. */
-    public static ItemStack getMainHandStack(class_1657 player) { // was: mp3zoXQFKUKYj5(PlayerEntity)
-        return player.method_6047(); // getMainHandStack()
+    public static ItemStack getMainHandStack(PlayerEntity player) { // was: mp3zoXQFKUKYj5(PlayerEntity)
+        return player.getMainHandStack();
     }
 
     /** Returns the player's off-hand ItemStack. */
-    public static ItemStack getOffHandStack(class_1657 player) { // was: Gt56Sj4a6BWhgB(PlayerEntity)
-        return player.method_6079(); // getOffHandStack()
+    public static ItemStack getOffHandStack(PlayerEntity player) { // was: Gt56Sj4a6BWhgB(PlayerEntity)
+        return player.getOffHandStack();
     }
 
     /**
      * Returns true if the player is holding or wearing any item
      * (main hand, off-hand, or any armor slot is non-empty).
      */
-    public static boolean hasAnyItem(class_1657 player) { // was: TAdu5cndwWu3A1(PlayerEntity)
-        if (!TagUtils.getMainHandStack(player).setStack()) return true; // !isEmpty()
-        if (!TagUtils.getOffHandStack(player).setStack())  return true;
+    public static boolean hasAnyItem(PlayerEntity player) { // was: TAdu5cndwWu3A1(PlayerEntity)
+        if (!TagUtils.getMainHandStack(player).isEmpty()) return true;
+        if (!TagUtils.getOffHandStack(player).isEmpty())  return true;
         for (ItemStack armorStack : TagUtils.getArmorStacks(player)) {
-            if (!armorStack.setStack()) return true;
+            if (!armorStack.isEmpty()) return true;
         }
         return false;
     }
@@ -62,7 +62,7 @@ public class TagUtils {
      * The returned int is packed as 0xRRGGBB (no alpha).
      */
     public static int hpToColor(double hp) { // was: BX92A0OIIvD9(double)
-        float t = (float) class_3532.method_15350((double)(hp / 100.0), (double) 0.0, (double) 1.0); // clamp
+        float t = (float) MathHelper.clamp((double)(hp / 100.0), (double) 0.0, (double) 1.0);
         int red, green;
         if (t < 0.5f) {
             // 0 → 0.5: red=255, green ramps 0→255
@@ -90,14 +90,14 @@ public class TagUtils {
     }
 
     /** Returns the distance from the local player to the given player entity. */
-    public static double distanceTo(class_1657 player) { // was: vgrtgn5(PlayerEntity)
-        MinecraftClient mc = MinecraftClient.method_1551(); // MinecraftClient.getInstance()
-        if (mc.field_1724 == null) return 0.0;
-        return mc.player.method_5739((class_1297) player); // distanceTo(Entity)
+    public static double distanceTo(PlayerEntity player) { // was: vgrtgn5(PlayerEntity)
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.player == null) return 0.0;
+        return mc.player.distanceTo((Entity) player);
     }
 
     /** Returns true if the given player is on Meteor's friends list. */
-    public static boolean isFriend(class_1657 player) { // was: VYEwzRq(PlayerEntity)
+    public static boolean isFriend(PlayerEntity player) { // was: VYEwzRq(PlayerEntity)
         return Friends.get().isFriend(player);
     }
 }

@@ -1,30 +1,30 @@
 // Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
 package musheor.utils.internal;
 
-import net.minecraft.class_1268;   // Hand
-import net.minecraft.ItemStack;   // ItemStack
-import net.minecraft.BlockPos;   // BlockPos
-import net.minecraft.Direction;   // Direction
-import net.minecraft.class_2382;   // Vec3i
-import net.minecraft.class_243;    // Vec3d
-import net.minecraft.class_2596;   // Packet
-import net.minecraft.class_2846;   // PlayerInteractBlockC2SPacket
-import net.minecraft.class_2885;   // PlayerInteractBlockC2SPacket (use)
-import net.minecraft.MinecraftClient;    // MinecraftClient
-import net.minecraft.Screen;   // BlockHitResult
+import net.minecraft.util.Hand;
+import net.minecraft.item.ItemStack;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3i;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.network.packet.Packet;
+import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
+import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.util.hit.BlockHitResult;
 
 /**
  * Low-level block placement engine.
  *
  * Places a block at the given position by:
- *   1. Swapping main-hand and off-hand items (to put the block in main hand)
- *   2. Sending a UseItemOnBlock packet for the MAIN_HAND
+ *   1. Swapping main-hand and off-hand items (to move the block to off-hand)
+ *   2. Sending a UseItemOnBlock (PlayerInteractBlockC2SPacket) for the OFF_HAND
  *   3. Swapping back
  *
- * This allows placing from the off-hand slot without visually switching the held item.
+ * This allows placing from the main-hand slot without visually switching the held item.
  */
 public class PlacementEngine {
-    private static final MinecraftClient mc = MinecraftClient.method_1551(); // MinecraftClient.getInstance() — was: HR1W3IhvN8Q
+    private static final MinecraftClient mc = MinecraftClient.getInstance(); // was: HR1W3IhvN8Q
 
     private PlacementEngine() {}
 
@@ -33,28 +33,28 @@ public class PlacementEngine {
      * Returns false if the client, player, or world is null.
      */
     public static boolean placeBlock(BlockPos pos, Direction direction) { // was: jOdDDFXSeWl4(BlockPos,Direction)
-        if (PlacementEngine.mc.field_1724 == null   // player
-                || mc.method_1562() == null          // getNetworkHandler()
-                || PlacementEngine.mc.field_1761 == null) { // interactionManager
+        if (PlacementEngine.mc.player == null
+                || mc.getNetworkHandler() == null
+                || PlacementEngine.mc.interactionManager == null) {
             return false;
         }
         PlacementEngine.swapCarriedItems();
-        PlacementEngine.sendPlacePacket(class_1268.field_5810, PlacementEngine.makeHitResult(pos, direction)); // Hand.MAIN_HAND
+        PlacementEngine.sendPlacePacket(Hand.OFF_HAND, PlacementEngine.makeHitResult(pos, direction));
         PlacementEngine.swapCarriedItems();
         return true;
     }
 
     /** Sends a UseItemOnBlock packet for the given hand and hit result. */
-    private static void sendPlacePacket(class_1268 hand, Screen hitResult) { // was: mp3zoXQFKUKYj5(Hand,BlockHitResult)
-        PlacementEngine.mc.field_1761.method_41931( // interactionManager.interactBlock
-            PlacementEngine.mc.field_1687,           // world
-            n -> new class_2885(hand, hitResult, n));
+    private static void sendPlacePacket(Hand hand, BlockHitResult hitResult) { // was: mp3zoXQFKUKYj5(Hand,BlockHitResult)
+        PlacementEngine.mc.interactionManager.sendSequencedPacket(
+            PlacementEngine.mc.world,
+            n -> new PlayerInteractBlockC2SPacket(hand, hitResult, n));
     }
 
-    /** Builds a BlockHitResult for placing against the center of the given face. */
-    private static Screen makeHitResult(BlockPos pos, Direction direction) { // was: VYEwzRq(BlockPos,Direction)
-        return new Screen(
-            class_243.method_24953((class_2382) pos), // Vec3d.ofCenter(pos)
+    /** Builds a BlockHitResult targeting the center of the given face. */
+    private static BlockHitResult makeHitResult(BlockPos pos, Direction direction) { // was: VYEwzRq(BlockPos,Direction)
+        return new BlockHitResult(
+            Vec3d.ofCenter((Vec3i) pos),
             direction,
             pos,
             false);
@@ -65,22 +65,23 @@ public class PlacementEngine {
      *   1. Sending a SWAP_ITEM_WITH_OFFHAND PlayerAction packet
      *   2. Swapping the inventory slot items in the local inventory model
      *
-     * Called before and after the place packet to keep off-hand contents in sync.
+     * The selected hotbar slot receives the off-hand item; slot 40 (off-hand) receives
+     * the main-hand item. Called before and after the place packet to keep inventory in sync.
      */
     private static void swapCarriedItems() { // was: MCTY8c
-        if (PlacementEngine.mc.field_1724 == null) return; // player null check
-        // Send the SWAP_ITEM_WITH_OFFHAND (action=6) packet
-        PlacementEngine.mc.player.field_3944.method_52787( // networkHandler.sendPacket
-            (class_2596) new class_2846(
-                class_2846.class_2847.field_12969,  // PlayerActionC2SPacket.Action.SWAP_ITEM_WITH_OFFHAND
-                BlockPos.field_10980,             // BlockPos.ORIGIN
-                Direction.field_11033));            // Direction.DOWN
+        if (PlacementEngine.mc.player == null) return;
+        // Notify the server of the swap
+        PlacementEngine.mc.player.networkHandler.sendPacket(
+            (Packet) new PlayerActionC2SPacket(
+                PlayerActionC2SPacket.Action.SWAP_ITEM_WITH_OFFHAND,
+                BlockPos.ORIGIN,
+                Direction.DOWN));
         // Reflect the swap locally in the player inventory
-        ItemStack mainHand = PlacementEngine.mc.player.method_6047();   // getMainHandStack()
-        ItemStack offHand  = PlacementEngine.mc.player.method_6079();   // getOffHandStack()
-        PlacementEngine.mc.player.getId().method_5447(            // getInventory().setStack(offHandSlot, mainHand)
-            PlacementEngine.mc.player.getId().field_7545,         // offHandSlot index
+        ItemStack mainHand = PlacementEngine.mc.player.getMainHandStack();
+        ItemStack offHand  = PlacementEngine.mc.player.getOffHandStack();
+        PlacementEngine.mc.player.getInventory().setStack(
+            PlacementEngine.mc.player.getInventory().selectedSlot,
             offHand);
-        PlacementEngine.mc.player.getId().method_5447(40, mainHand); // slot 40 = off-hand in vanilla
+        PlacementEngine.mc.player.getInventory().setStack(40, mainHand); // slot 40 = off-hand
     }
 }

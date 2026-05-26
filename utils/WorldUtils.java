@@ -19,51 +19,51 @@ import musheor.utils.internal.HighwayState;
 import musheor.utils.internal.PathingHelper;
 import musheor.utils.internal.RateController;
 import musheor.utils.system.MusheorSystem;
-import net.minecraft.class_1268;   // Hand
-import net.minecraft.class_1297;   // Entity
-import net.minecraft.class_1511;   // ArmorStandEntity
-import net.minecraft.class_1542;   // ItemEntity
-import net.minecraft.class_1690;   // Boat/vehicle entity
-import net.minecraft.ItemStack;   // Item
-import net.minecraft.ItemStack;   // ItemStack
-import net.minecraft.Items;   // Items
-import net.minecraft.class_1937;   // World
-import net.minecraft.Blocks;   // Blocks
-import net.minecraft.Block;   // Block
-import net.minecraft.BlockPos;   // BlockPos
-import net.minecraft.Direction;   // Direction
-import net.minecraft.class_238;    // Box
-import net.minecraft.class_2382;   // Vec3i
-import net.minecraft.class_243;    // Vec3d
-import net.minecraft.class_2508;   // FluidBlock
-import net.minecraft.class_2596;   // Packet
-import net.minecraft.class_2846;   // PlayerActionC2SPacket
-import net.minecraft.class_2885;   // PlayerInteractBlockC2SPacket
-import net.minecraft.MinecraftClient;    // MinecraftClient
-import net.minecraft.class_3532;   // MathHelper
-import net.minecraft.class_3612;   // Fluid
-import net.minecraft.Screen;   // BlockHitResult
-import net.minecraft.class_746;    // Entity (for angle calc)
-import net.minecraft.class_7923;   // Registries
+import net.minecraft.block.Block;
+import net.minecraft.block.Blocks;
+import net.minecraft.block.SignBlock;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.ClientPlayerEntity;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.ItemEntity;
+import net.minecraft.entity.decoration.EndCrystalEntity;
+import net.minecraft.entity.vehicle.BoatEntity;
+import net.minecraft.fluid.Fluids;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
+import net.minecraft.network.packet.Packet;
+import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
+import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
+import net.minecraft.registry.Registries;
+import net.minecraft.util.Hand;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.MathHelper;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.math.Vec3i;
+import net.minecraft.world.World;
 
 public class WorldUtils {
-    private static final MinecraftClient mc = MinecraftClient.method_1551(); // MinecraftClient.getInstance()
+    private static final MinecraftClient mc = MinecraftClient.getInstance();
     private static int gatherItemIndex = 0; // was: slvxzlssLu
 
     /** Returns true if the block directly below the player's feet is the given block type. */
     public static boolean isBlockAtFeet(Block block) { // was: Gt56Sj4a6BWhgB(Block)
-        if (WorldUtils.mc.field_1724 == null || WorldUtils.mc.field_1687 == null) { // player, world
+        if (WorldUtils.mc.player == null || WorldUtils.mc.world == null) {
             return false;
         }
-        BlockPos pos = WorldUtils.mc.player.getBlockPos().method_10074(); // getBlockPos().down()
-        return WorldUtils.mc.world.getBlockState(pos).getBlock() == block; // getBlockState().getBlock()
+        BlockPos pos = WorldUtils.mc.player.getBlockPos().down();
+        return WorldUtils.mc.world.getBlockState(pos).getBlock() == block;
     }
 
     /** Returns a BlockPos 2 blocks ahead of the player in the given Direction8. */
     public static BlockPos getOffset2AheadPos(Direction8 direction8) { // was: jOdDDFXSeWl4(Direction8)
-        int x = WorldUtils.mc.player.getX(); // getBlockX()
-        int y = WorldUtils.mc.player.getY(); // getBlockY()
-        int z = WorldUtils.mc.player.getZ(); // getBlockZ()
+        int x = (int) WorldUtils.mc.player.getX();
+        int y = (int) WorldUtils.mc.player.getY();
+        int z = (int) WorldUtils.mc.player.getZ();
         int dx = 0;
         int dz = 0;
         switch (direction8.ordinal()) {
@@ -89,7 +89,7 @@ public class WorldUtils {
      * tells Baritone to path to it ("return to highway").
      */
     public static void returnToHighway() { // was: WvQP0Zr
-        if (WorldUtils.mc.field_1724 == null || WorldUtils.mc.field_1687 == null) {
+        if (WorldUtils.mc.player == null || WorldUtils.mc.world == null) {
             return;
         }
         BlockPos playerPos = WorldUtils.mc.player.getBlockPos();
@@ -102,11 +102,10 @@ public class WorldUtils {
                     playerPos.getX() + i,
                     HighwayState.getInstance().getHighwayY().intValue(),
                     playerPos.getZ() + j);
-                // Check block below candidate is obsidian and candidate is within radius
                 if (WorldUtils.mc.world.getBlockState(
-                        candidate.method_33096(HighwayState.getInstance().getHighwayY() - 1)) // withY(y-1)
-                        .getBlock() != Blocks.field_10540) continue; // != Blocks.OBSIDIAN
-                double dist = playerPos.method_46558().method_1028( // toCenterPos().distanceTo()
+                        candidate.withY(HighwayState.getInstance().getHighwayY() - 1))
+                        .getBlock() != Blocks.OBSIDIAN) continue;
+                double dist = playerPos.toCenterPos().squaredDistanceTo(
                     (double) candidate.getX(),
                     (double) HighwayState.getInstance().getHighwayY().intValue(),
                     (double) candidate.getZ());
@@ -116,17 +115,17 @@ public class WorldUtils {
             }
         }
         if (best != null) {
-            PathingHelper.setGoal(best); // was: l92qSNnpKrYO
-            PathingHelper.startPathing(); // was: gaJr0zjHBLiO
+            PathingHelper.setGoal(best);
+            PathingHelper.startPathing();
             MusheorSystem.debug("Going back onto the highway...", new Object[0]);
         }
     }
 
-    /** Returns true if any horizontally-adjacent face of the given BlockPos is solid. */
+    /** Returns true if any adjacent face (excluding UP) of the given BlockPos is liquid. */
     public static boolean hasAdjacentSolid(BlockPos pos) { // was: CEOjBr5G5R
         return Arrays.stream(Direction.values())
-            .filter(d -> d != Direction.field_11036) // != Direction.UP
-            .anyMatch(d -> WorldUtils.mc.world.getBlockState(pos.method_10093(d)).method_51176()); // offset(d).isSolid()
+            .filter(d -> d != Direction.UP)
+            .anyMatch(d -> WorldUtils.mc.world.getBlockState(pos.offset(d)).isLiquid());
     }
 
     /**
@@ -134,78 +133,74 @@ public class WorldUtils {
      * by setting a target block in HighwayState.
      */
     public static void handleLavaRemoval() { // was: selaO6lwe7
-        if (WorldUtils.mc.field_1724 == null || WorldUtils.mc.field_1687 == null) {
+        if (WorldUtils.mc.player == null || WorldUtils.mc.world == null) {
             return;
         }
-        // If we already have a target lava block, check if it's still lava
-        if (HighwayState.getInstance().getLavaTargetBlock() != null) { // was: HBAiI3pyGGGxpI2b
-            if (WorldUtils.mc.world.method_8316(
-                    HighwayState.getInstance().getLavaTargetBlock()).method_15772() // getFluidState().getFluid()
-                    != class_3612.field_15908) { // != Fluids.WATER (fluid state empty means no fluid)
-                PathingHelper.stopPathing(); // was: xRVyNRV3cB7
-                HighwayState.getInstance().setLavaTargetBlock(null); // was: ULOAMKfWE3NZZTj8
+        if (HighwayState.getInstance().getLavaTargetBlock() != null) {
+            if (WorldUtils.mc.world.getFluidState(
+                    HighwayState.getInstance().getLavaTargetBlock()).getFluid()
+                    != Fluids.LAVA) {
+                PathingHelper.stopPathing();
+                HighwayState.getInstance().setLavaTargetBlock(null);
             } else {
-                PathingHelper.setGoal( // was: l92qSNnpKrYO
+                PathingHelper.setGoal(
                     HighwayState.getInstance().getLavaTargetBlock()
-                        .method_33096(HighwayState.getInstance().getHighwayY().intValue())); // withY
+                        .withY(HighwayState.getInstance().getHighwayY().intValue()));
             }
             return;
         }
-        // If we have a saved position to return to, check if we've reached it
-        if (HighwayState.getInstance().getSavedReturnPos() != null) { // was: rUchPoPt
+        if (HighwayState.getInstance().getSavedReturnPos() != null) {
             if (WorldUtils.mc.player.getBlockPos()
                     .equals(HighwayState.getInstance().getSavedReturnPos())) {
                 PathingHelper.stopPathing();
-                HighwayState.getInstance().setSavedReturnPos(null); // was: gsYdyKVgv
+                HighwayState.getInstance().setSavedReturnPos(null);
             } else {
                 PathingHelper.setGoal(HighwayState.getInstance().getSavedReturnPos());
             }
             return;
         }
-        // Scan for lava ahead (cardinal highway)
-        if (HighwayBuilder.getHighwayType() == HighwayBuilder.HighwayType.CARDINAL) { // was: b76P5ieurZIX
-            for (BlockPos pos : BlockPositions.getCardinalObstructionPositions()) { // was: txFOGrboKBXQp
-                if (PathingHelper.isAlreadyPathing()) return; // was: LcPVM4w5KCoKSxGs
-                if (WorldUtils.mc.world.method_8316(pos).method_15772() == class_3612.field_15907
-                        || WorldUtils.mc.world.method_8316(pos).method_15772() != class_3612.field_15908) continue;
-                MusheorSystem.debug("Found obstructing lava ahead, removing...", new Object[0]);
-                PlayerUtils.setAutoWalkActive(false); // was: KP44bk
-                HighwayState.getInstance().setLavaTargetBlock(pos);
-                HighwayState.getInstance().setSavedReturnPos(
-                    WorldUtils.mc.player.getBlockPos().method_10062()); // getBlockPos().down()
-                return;
-            }
-        }
-        // Scan for lava ahead (diagonal highway)
-        if (HighwayBuilder.getHighwayType() == HighwayBuilder.HighwayType.DIAGONAL) { // was: xpLMsAtAuXAx
-            for (BlockPos pos : BlockPositions.getDiagonalObstructionPositions()) { // was: HP7CUOuiyLUHkEkD
+        if (HighwayBuilder.getHighwayType() == HighwayBuilder.HighwayType.CARDINAL) {
+            for (BlockPos pos : BlockPositions.getCardinalObstructionPositions()) {
                 if (PathingHelper.isAlreadyPathing()) return;
-                if (WorldUtils.mc.world.method_8316(pos).method_15772() == class_3612.field_15907
-                        || WorldUtils.mc.world.method_8316(pos).method_15772() != class_3612.field_15908) continue;
+                if (WorldUtils.mc.world.getFluidState(pos).getFluid() == Fluids.FLOWING_LAVA
+                        || WorldUtils.mc.world.getFluidState(pos).getFluid() != Fluids.LAVA) continue;
                 MusheorSystem.debug("Found obstructing lava ahead, removing...", new Object[0]);
                 PlayerUtils.setAutoWalkActive(false);
                 HighwayState.getInstance().setLavaTargetBlock(pos);
                 HighwayState.getInstance().setSavedReturnPos(
-                    WorldUtils.mc.player.getBlockPos().method_10062());
+                    WorldUtils.mc.player.getBlockPos().toImmutable());
+                return;
+            }
+        }
+        if (HighwayBuilder.getHighwayType() == HighwayBuilder.HighwayType.DIAGONAL) {
+            for (BlockPos pos : BlockPositions.getDiagonalObstructionPositions()) {
+                if (PathingHelper.isAlreadyPathing()) return;
+                if (WorldUtils.mc.world.getFluidState(pos).getFluid() == Fluids.FLOWING_LAVA
+                        || WorldUtils.mc.world.getFluidState(pos).getFluid() != Fluids.LAVA) continue;
+                MusheorSystem.debug("Found obstructing lava ahead, removing...", new Object[0]);
+                PlayerUtils.setAutoWalkActive(false);
+                HighwayState.getInstance().setLavaTargetBlock(pos);
+                HighwayState.getInstance().setSavedReturnPos(
+                    WorldUtils.mc.player.getBlockPos().toImmutable());
                 return;
             }
         }
     }
 
     /** Returns all non-air BlockPos positions occupied by the entity's bounding box foot region. */
-    public static List<BlockPos> getEntityFootBlocks(class_1297 entity) { // was: jOdDDFXSeWl4(Entity)
-        assert (WorldUtils.mc.field_1687 != null);
+    public static List<BlockPos> getEntityFootBlocks(Entity entity) { // was: jOdDDFXSeWl4(Entity)
+        assert (WorldUtils.mc.world != null);
         ArrayList<BlockPos> result = new ArrayList<>();
-        class_238 box = entity.method_5829().method_35575(entity.getY() - 0.2).method_35578(entity.getY()); // getBoundingBox
-        int minX = class_3532.method_15357((double) box.method_61125().method_10216()); // MathHelper.floor
-        int maxX = class_3532.method_15357((double) box.method_61126().method_10216());
-        int minZ = class_3532.method_15357((double) box.method_61125().method_10215());
-        int maxZ = class_3532.method_15357((double) box.method_61126().method_10215());
-        int y    = class_3532.method_15357((double)(entity.getY() - 0.2));
+        Box box = entity.getBoundingBox().withMinY(entity.getY() - 0.2).withMaxY(entity.getY());
+        int minX = MathHelper.floor((double) box.getMinPos().getX());
+        int maxX = MathHelper.floor((double) box.getMaxPos().getX());
+        int minZ = MathHelper.floor((double) box.getMinPos().getZ());
+        int maxZ = MathHelper.floor((double) box.getMaxPos().getZ());
+        int y    = MathHelper.floor((double)(entity.getY() - 0.2));
         for (int x = minX; x <= maxX; ++x) {
             for (int z = minZ; z <= maxZ; ++z) {
                 BlockPos pos = new BlockPos(x, y, z);
-                if (WorldUtils.getBlockAt(pos) == Blocks.field_10124) continue; // Blocks.AIR
+                if (WorldUtils.getBlockAt(pos) == Blocks.AIR) continue;
                 result.add(pos);
             }
         }
@@ -213,10 +208,10 @@ public class WorldUtils {
     }
 
     /** Returns the first Entity found at the given BlockPos, or null. */
-    public static class_1297 getEntityAt(class_1937 world, BlockPos pos) { // was: Gt56Sj4a6BWhgB(World,BlockPos)
-        class_238 box = new class_238(pos);
-        List<?> list = world.method_8390(class_1297.class, box, e -> true); // getEntitiesByType
-        return list.isEmpty() ? null : (class_1297) list.getFirst();
+    public static Entity getEntityAt(World world, BlockPos pos) { // was: Gt56Sj4a6BWhgB(World,BlockPos)
+        Box box = new Box(pos);
+        List<?> list = world.getEntitiesByClass(Entity.class, box, e -> true);
+        return list.isEmpty() ? null : (Entity) list.getFirst();
     }
 
     /**
@@ -224,24 +219,24 @@ public class WorldUtils {
      * Returns true on success.
      */
     public static boolean placeBlockPacket(BlockPos pos, Direction side) { // was: jOdDDFXSeWl4(BlockPos,Direction)
-        if (WorldUtils.mc.field_1724 == null || mc.method_1562() == null || WorldUtils.mc.field_1761 == null) {
+        if (WorldUtils.mc.player == null || mc.getNetworkHandler() == null || WorldUtils.mc.interactionManager == null) {
             return false;
         }
         WorldUtils.swapCarriedItems();
-        WorldUtils.sendPlacePacket(class_1268.field_5810, WorldUtils.makeHitResult(pos, side)); // Hand.OFF_HAND
+        WorldUtils.sendPlacePacket(Hand.OFF_HAND, WorldUtils.makeHitResult(pos, side));
         WorldUtils.swapCarriedItems();
         return true;
     }
 
     /** Creates a BlockHitResult aimed at the center of the given face of the given BlockPos. */
-    public static Screen makeHitResult(BlockPos pos, Direction side) { // was: mp3zoXQFKUKYj5(BlockPos,Direction)
-        return new Screen(class_243.method_24953((class_2382) pos), side, pos, false); // Vec3d.of(pos)
+    public static BlockHitResult makeHitResult(BlockPos pos, Direction side) { // was: mp3zoXQFKUKYj5(BlockPos,Direction)
+        return new BlockHitResult(Vec3d.ofCenter((Vec3i) pos), side, pos, false);
     }
 
     /** Sends a PlayerInteractBlockC2SPacket for the given hand and hit result. */
-    public static void sendPlacePacket(class_1268 hand, Screen hitResult) { // was: jOdDDFXSeWl4(Hand,BlockHitResult)
-        WorldUtils.mc.field_1761.method_41931(WorldUtils.mc.field_1687,
-            n -> new class_2885(hand, hitResult, n));
+    public static void sendPlacePacket(Hand hand, BlockHitResult hitResult) { // was: jOdDDFXSeWl4(Hand,BlockHitResult)
+        WorldUtils.mc.interactionManager.sendSequencedPacket(WorldUtils.mc.world,
+            n -> new PlayerInteractBlockC2SPacket(hand, hitResult, n));
     }
 
     /**
@@ -249,60 +244,60 @@ public class WorldUtils {
      * then swaps inventory hotbar slots 0 and 40 (main/offhand mirror).
      */
     public static void swapCarriedItems() { // was: l3ot1CwoJ9CsS
-        if (WorldUtils.mc.field_1724 == null || WorldUtils.mc.field_1687 == null) {
+        if (WorldUtils.mc.player == null || WorldUtils.mc.world == null) {
             return;
         }
-        WorldUtils.mc.field_1761.method_41931(WorldUtils.mc.field_1687,
-            n -> new class_2846(class_2846.class_2847.field_12969, // Action.SWAP_ITEM_WITH_OFFHAND
-                BlockPos.field_10980, Direction.field_11033)); // BlockPos.ORIGIN, Direction.DOWN
-        ItemStack mainHand = WorldUtils.mc.player.method_6047(); // getMainHandStack
-        ItemStack offHand  = WorldUtils.mc.player.method_6079(); // getOffHandStack
-        WorldUtils.mc.player.getId().method_5447(
-            WorldUtils.mc.player.getId().field_7545, offHand);  // getInventory().setStack(selected, offhand)
-        WorldUtils.mc.player.getId().method_5447(40, mainHand); // slot 40 = offhand
+        WorldUtils.mc.interactionManager.sendSequencedPacket(WorldUtils.mc.world,
+            n -> new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.SWAP_ITEM_WITH_OFFHAND,
+                BlockPos.ORIGIN, Direction.DOWN));
+        ItemStack mainHand = WorldUtils.mc.player.getMainHandStack();
+        ItemStack offHand  = WorldUtils.mc.player.getOffHandStack();
+        WorldUtils.mc.player.getInventory().setStack(
+            WorldUtils.mc.player.getInventory().selectedSlot, offHand);
+        WorldUtils.mc.player.getInventory().setStack(40, mainHand);
     }
 
     /**
      * Equips the given item and places a block at the position with the given face,
      * if Meteor's BlockUtils says placement is allowed.
      */
-    public static boolean placeBlockWithItem(ItemStack item, BlockPos pos, Direction side) { // was: jOdDDFXSeWl4(Item,BlockPos,Direction)
-        if (!BlockUtils.canPlaceBlock(pos, true, Block.method_9503(item))) { // Block.getBlockFromItem
+    public static boolean placeBlockWithItem(Item item, BlockPos pos, Direction side) { // was: jOdDDFXSeWl4(Item,BlockPos,Direction)
+        if (!BlockUtils.canPlaceBlock(pos, true, Block.getBlockFromItem(item))) {
             return false;
         }
-        InventoryManager.equipItem(item); // was: L5CF0C6jx0T17H4I
+        InventoryManager.equipItem(item);
         return WorldUtils.placeBlockPacket(pos, side);
     }
 
     /** Points the player's view toward the center of the given BlockPos, choosing the best face. */
     public static void lookAtBlock(BlockPos pos) { // was: MS1x7YGHjIg7eB
-        class_243 hitVec = class_243.method_24953((class_2382) pos); // Vec3d.of
+        Vec3d hitVec = Vec3d.ofCenter((Vec3i) pos);
         Direction side = BlockUtils.getPlaceSide(pos);
         if (side != null) {
-            pos.method_10093(side); // offset(side)
-            hitVec = hitVec.method_1019(class_243.method_24954((class_2382) side.method_62675()).method_1021(0.5)); // add(vec * 0.5)
+            pos.offset(side);
+            hitVec = hitVec.add(Vec3d.of((Vec3i) side.getVector()).multiply(0.5));
         }
-        assert (WorldUtils.mc.field_1724 != null);
-        float[] angles = WorldUtils.calcAngles(WorldUtils.mc.field_1724, hitVec);
-        WorldUtils.mc.player.method_36456(angles[0]); // setYaw
-        WorldUtils.mc.player.method_36457(angles[1]); // setPitch
+        assert (WorldUtils.mc.player != null);
+        float[] angles = WorldUtils.calcAngles(WorldUtils.mc.player, hitVec);
+        WorldUtils.mc.player.setYaw(angles[0]);
+        WorldUtils.mc.player.setPitch(angles[1]);
     }
 
     /** Points the player's view toward the center of the given face on the given BlockPos. */
     public static void lookAtBlockFace(BlockPos pos, Direction side) { // was: Gt56Sj4a6BWhgB(BlockPos,Direction)
-        class_243 hitVec = class_243.method_24953((class_2382) pos)
-            .method_1019(class_243.method_24954((class_2382) side.method_62675()).method_1021(0.5));
-        float[] angles = WorldUtils.calcAngles(WorldUtils.mc.field_1724, hitVec);
-        WorldUtils.mc.player.method_36456(angles[0]);
-        WorldUtils.mc.player.method_36457(angles[1]);
+        Vec3d hitVec = Vec3d.ofCenter((Vec3i) pos)
+            .add(Vec3d.of((Vec3i) side.getVector()).multiply(0.5));
+        float[] angles = WorldUtils.calcAngles(WorldUtils.mc.player, hitVec);
+        WorldUtils.mc.player.setYaw(angles[0]);
+        WorldUtils.mc.player.setPitch(angles[1]);
     }
 
     /** Calculates yaw and pitch angles needed for the given entity to look at targetPos. */
-    static float[] calcAngles(class_746 entity, class_243 targetPos) { // was: jOdDDFXSeWl4(Entity,Vec3d)
-        class_243 eyePos = entity.method_33571(); // getEyePos
-        double dx = targetPos.field_1352 - eyePos.field_1352; // x
-        double dy = targetPos.field_1351 - eyePos.field_1351; // y
-        double dz = targetPos.field_1350 - eyePos.field_1350; // z
+    static float[] calcAngles(ClientPlayerEntity entity, Vec3d targetPos) { // was: jOdDDFXSeWl4(Entity,Vec3d)
+        Vec3d eyePos = entity.getEyePos();
+        double dx = targetPos.x - eyePos.x;
+        double dy = targetPos.y - eyePos.y;
+        double dz = targetPos.z - eyePos.z;
         double dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
         double yaw   = -Math.atan2(dx, dz) / Math.PI * 180.0;
         double pitch = -Math.asin(dy / dist) / Math.PI * 180.0;
@@ -312,13 +307,13 @@ public class WorldUtils {
     /** Returns true if every BlockPos in the list has at least one solid neighbor below/adjacent. */
     public static boolean allHaveSupport(List<BlockPos> positions) { // was: UgB10d(List)
         if (positions.isEmpty()) return false;
-        assert (WorldUtils.mc.field_1724 != null);
+        assert (WorldUtils.mc.player != null);
         for (BlockPos pos : positions) {
             boolean hasSupport = false;
             for (int i = -1; i <= 1 && !hasSupport; ++i) {
                 for (int j = -1; j <= 1 && !hasSupport; ++j) {
-                    BlockPos below = pos.method_10069(i, -1, j); // add(dx, -1, dz)
-                    if (WorldUtils.mc.world.getBlockState(below).isAir()) continue; // isAir
+                    BlockPos below = pos.add(i, -1, j);
+                    if (WorldUtils.mc.world.getBlockState(below).isAir()) continue;
                     hasSupport = true;
                 }
             }
@@ -330,14 +325,14 @@ public class WorldUtils {
 
     /** Returns true if the BlockPos is not air, not replaceable, and not the given block type. */
     public static boolean needsPlacement(BlockPos pos, Block block) { // was: jOdDDFXSeWl4(BlockPos,Block)
-        assert (WorldUtils.mc.field_1687 != null);
-        return !WorldUtils.mc.world.getBlockState(pos).isAir()   // !isAir
-            && !WorldUtils.mc.world.getBlockState(pos).method_45474()   // !isReplaceable
+        assert (WorldUtils.mc.world != null);
+        return !WorldUtils.mc.world.getBlockState(pos).isAir()
+            && !WorldUtils.mc.world.getBlockState(pos).isReplaceable()
             && WorldUtils.mc.world.getBlockState(pos).getBlock() != block;
     }
 
     /**
-     * Spleef detection: if a non-player, non-armor-stand, non-vehicle entity is standing on
+     * Spleef detection: if a non-player, non-end-crystal, non-boat entity is standing on
      * a block in the array, mine that block to drop the griefer.
      */
     public static void detectAndHandleSpleef(BlockPos[] positions) { // was: jOdDDFXSeWl4(BlockPos[])
@@ -346,14 +341,14 @@ public class WorldUtils {
                     || !BlockUtils.canPlace(pos, false)
                     || BlockUtils.canPlace(pos, true)) continue;
             PlayerUtils.setAutoWalkActive(false);
-            MusheorSystem.debug("Spleefing = %s", HighwayState.getInstance().isSpleefing()); // was: NZkZx8MJ67Zw
-            assert (WorldUtils.mc.field_1687 != null);
-            class_1297 entity = WorldUtils.getEntityAt((class_1937) WorldUtils.mc.field_1687, pos);
+            MusheorSystem.debug("Spleefing = %s", HighwayState.getInstance().isSpleefing());
+            assert (WorldUtils.mc.world != null);
+            Entity entity = WorldUtils.getEntityAt((World) WorldUtils.mc.world, pos);
             if (entity == null) return;
-            if (entity == WorldUtils.mc.field_1724
-                    || !entity.method_5805() // isAlive
-                    || entity instanceof class_1511  // ArmorStandEntity
-                    || entity instanceof class_1690) continue; // boat/vehicle
+            if (entity == WorldUtils.mc.player
+                    || !entity.isAlive()
+                    || entity instanceof EndCrystalEntity
+                    || entity instanceof BoatEntity) continue;
             List<BlockPos> footBlocks = WorldUtils.getEntityFootBlocks(entity);
             for (BlockPos footPos : footBlocks) {
                 if (!BlockUtils.canPlace(pos, true)) {
@@ -363,11 +358,11 @@ public class WorldUtils {
                         inArray = true;
                         break;
                     }
-                    InventoryManager.equipBestToolForBlock(footPos); // was: J2pm2c07elEb5G
+                    InventoryManager.equipBestToolForBlock(footPos);
                     BlockUtils.breakBlock(footPos, true);
-                    HighwayState.getInstance().setSpleefing(true); // was: xG2PP8jo4RWLS
+                    HighwayState.getInstance().setSpleefing(true);
                     MusheorSystem.debug("Spleefing %s at x: %s y: %s z: %s",
-                        entity.method_5477().getString(), // getDisplayName
+                        entity.getName().getString(),
                         entity.getBlockPos().getX(),
                         entity.getBlockPos().getY(),
                         entity.getBlockPos().getZ());
@@ -382,7 +377,7 @@ public class WorldUtils {
     /** Returns true if the BlockPos is within the configured placement range. */
     public static boolean isInPlacementRange(BlockPos pos) { // was: KDNrzlU9qtrEv
         double range = (Double) MusheorSystem.Manager.placementRange.get();
-        return WorldUtils.mc.player.method_5649( // squaredDistanceTo
+        return WorldUtils.mc.player.squaredDistanceTo(
             (double) pos.getX(),
             (double) pos.getY(),
             (double) pos.getZ()) <= range * range;
@@ -390,7 +385,7 @@ public class WorldUtils {
 
     /** Returns true if the BlockPos is within the given distance (squared check). */
     public static boolean isWithinDistance(BlockPos pos, double distance) { // was: jOdDDFXSeWl4(BlockPos,double)
-        return WorldUtils.mc.player.method_5649(
+        return WorldUtils.mc.player.squaredDistanceTo(
             (double) pos.getX(),
             (double) pos.getY(),
             (double) pos.getZ()) <= distance * distance;
@@ -401,7 +396,7 @@ public class WorldUtils {
      * Entries older than placementTimeout ticks or matching the given block type are removed.
      */
     public static void cleanPlacementCache(int currentTick, Block block) { // was: jOdDDFXSeWl4(int,Block)
-        HighwayState.getInstance().getPlacementCache().entrySet().removeIf(entry -> { // was: Os3dd8a
+        HighwayState.getInstance().getPlacementCache().entrySet().removeIf(entry -> {
             if (block != null && WorldUtils.mc.world.getBlockState(
                     (BlockPos) entry.getKey()).getBlock() == block) {
                 return true;
@@ -417,20 +412,20 @@ public class WorldUtils {
      */
     public static void tryPlaceBlocks(BlockPos[] positions, boolean isFloor) { // was: jOdDDFXSeWl4(BlockPos[],boolean)
         HighwayState state = HighwayState.getInstance();
-        if (WorldUtils.mc.field_1724 == null || WorldUtils.mc.field_1687 == null
-                || state.isSpleefing()           // was: NZkZx8MJ67Zw
-                || KekNuker.isActive()            // was: Pa3aVwRtUo45jMG
-                || HighwayBuilder.isWaiting()) {  // was: zl2vxyh
+        if (WorldUtils.mc.player == null || WorldUtils.mc.world == null
+                || state.isSpleefing()
+                || KekNuker.isActive()
+                || HighwayBuilder.isWaiting()) {
             return;
         }
-        Block targetBlock = isFloor ? HighwayBuilder.getFloorBlock()    // was: e4uKoS
-                                         : HighwayBuilder.getPavingBlock();  // was: yaVvWAqooeFn
+        Block targetBlock = isFloor ? HighwayBuilder.getFloorBlock()
+                                    : HighwayBuilder.getPavingBlock();
         double distToSolid = WorldUtils.getDistanceToFirstSolidAhead(HighwayBuilder.getPavingBlock());
 
         if (HighwayBuilder.getHighwayType() == HighwayBuilder.HighwayType.CARDINAL) {
             if (distToSolid <= 1.0) {
                 PlayerUtils.setAutoWalkActive(false);
-                state.setWalkingBlocked(true); // was: BX92A0OIIvD9
+                state.setWalkingBlocked(true);
             } else {
                 state.setWalkingBlocked(false);
                 PlayerUtils.setAutoWalkActive(true);
@@ -453,22 +448,22 @@ public class WorldUtils {
         }
 
         if (anyNeedPlacing) {
-            InventoryManager.equipItem(targetBlock.method_8389()); // asItem
+            InventoryManager.equipItem(targetBlock.asItem());
             WorldUtils.swapCarriedItems();
             for (BlockPos pos : positions) {
                 if (!BlockUtils.canPlace(pos, true)) continue;
-                state.setCurrentlyPlacing(true); // was: L5CF0C6jx0T17H4I(true)
-                if (RateController.checkPlaceRate()) { // was: qy8UwM99rVr
-                    WorldUtils.sendPlacePacket(class_1268.field_5810, // Hand.OFF_HAND
-                        WorldUtils.makeHitResult(pos, Direction.field_11033)); // Direction.DOWN
-                    state.getPlacementCache().put(pos, state.getCurrentTick()); // was: yIXEDGFGtS9H
+                state.setCurrentlyPlacing(true);
+                if (RateController.checkPlaceRate()) {
+                    WorldUtils.sendPlacePacket(Hand.OFF_HAND,
+                        WorldUtils.makeHitResult(pos, Direction.DOWN));
+                    state.getPlacementCache().put(pos, state.getCurrentTick());
                     MusheorSystem.debug("placed \u00a75%s \u00a7rat %s, %s, %s",
-                        class_7923.field_41178.method_10221(targetBlock.method_8389()).toString(), // Registries.ITEM.getId
+                        Registries.ITEM.getId(targetBlock.asItem()).toString(),
                         pos.getX(), pos.getY(), pos.getZ());
-                    if (state.getRecentlyPlaced().contains(pos)) continue; // was: Mz2EP5
+                    if (state.getRecentlyPlaced().contains(pos)) continue;
                     state.getRecentlyPlaced().add(pos);
-                    if (!HighwayBuilder.getPavingBlock().equals(Blocks.field_10540)) continue; // Blocks.OBSIDIAN
-                    state.incrementBlocksPlaced(); // was: s6I5Zvj
+                    if (!HighwayBuilder.getPavingBlock().equals(Blocks.OBSIDIAN)) continue;
+                    state.incrementBlocksPlaced();
                     continue;
                 }
                 state.setCurrentlyPlacing(false);
@@ -480,50 +475,50 @@ public class WorldUtils {
 
     /** Places blocks from a list at positions within 4.5 blocks, using the given block type. */
     public static void placeBlockList(List<BlockPos> positions, Block block) { // was: jOdDDFXSeWl4(List,Block)
-        InventoryManager.equipItem(block.method_8389());
+        InventoryManager.equipItem(block.asItem());
         WorldUtils.swapCarriedItems();
         for (BlockPos pos : positions) {
             if (!BlockUtils.canPlace(pos, true)
                     || !meteordevelopment.meteorclient.utils.player.PlayerUtils.isWithin(pos, 4.5)) continue;
             if (!RateController.checkPlaceRate()) break;
-            WorldUtils.sendPlacePacket(class_1268.field_5810,
-                WorldUtils.makeHitResult(pos, Direction.field_11033));
+            WorldUtils.sendPlacePacket(Hand.OFF_HAND,
+                WorldUtils.makeHitResult(pos, Direction.DOWN));
         }
         WorldUtils.swapCarriedItems();
     }
 
-    /** Places ice blocks below the player's feet in the four forward positions for ice-floor highways. */
+    /** Places netherrack blocks below the player's feet in the four forward positions for ice-floor highways. */
     public static void buildIceFloor() { // was: QigP9ftge6
-        if (WorldUtils.mc.field_1724 == null || WorldUtils.mc.field_1687 == null) return;
+        if (WorldUtils.mc.player == null || WorldUtils.mc.world == null) return;
         BlockPos playerPos = WorldUtils.mc.player.getBlockPos();
         for (int i = 1; i <= 4; ++i) {
             BlockPos target = null;
-            switch (HighwayBuilder.getDirection().ordinal()) { // was: kLIvClyeu
-                case 4: target = playerPos.method_10069(0, -1, -i); break;
-                case 0: target = playerPos.method_10069(0, -1,  i); break;
-                case 6: target = playerPos.method_10069( i, -1, 0); break;
-                case 2: target = playerPos.method_10069(-i, -1, 0); break;
-                case 5: target = playerPos.method_10069( i, -1, -i); break;
-                case 3: target = playerPos.method_10069(-i, -1, -i); break;
-                case 7: target = playerPos.method_10069( i, -1,  i); break;
-                case 1: target = playerPos.method_10069(-i, -1,  i); break;
+            switch (HighwayBuilder.getDirection().ordinal()) {
+                case 4: target = playerPos.add(0, -1, -i); break;
+                case 0: target = playerPos.add(0, -1,  i); break;
+                case 6: target = playerPos.add( i, -1, 0); break;
+                case 2: target = playerPos.add(-i, -1, 0); break;
+                case 5: target = playerPos.add( i, -1, -i); break;
+                case 3: target = playerPos.add(-i, -1, -i); break;
+                case 7: target = playerPos.add( i, -1,  i); break;
+                case 1: target = playerPos.add(-i, -1,  i); break;
             }
             if (target == null) return;
-            if (mc.method_1562() == null) return;
-            if (WorldUtils.mc.world.getBlockState(target).getBlock() == Blocks.field_10114) { // Blocks.BEDROCK
+            if (mc.getNetworkHandler() == null) return;
+            if (WorldUtils.mc.world.getBlockState(target).getBlock() == Blocks.SOUL_SAND) {
                 BlockUtils.breakBlock(target, false);
             }
-            if (!WorldUtils.mc.world.getBlockState(target).isAir()) continue; // isAir
-            WorldUtils.placeBlockWithItem(Items.field_8328, target, Direction.field_11033); // Items.ICE, DOWN
+            if (!WorldUtils.mc.world.getBlockState(target).isAir()) continue;
+            WorldUtils.placeBlockWithItem(Items.NETHERRACK, target, Direction.DOWN);
         }
     }
 
     /** Checks for server-side lag using TickRate; pauses AutoWalk if lag is detected. */
     public static boolean checkForLag() { // was: btLCQHvKVR
         float timeSinceTick;
-        if (HighwayBuilder.isLagDetectionEnabled() // was: oknfyMh
+        if (HighwayBuilder.isLagDetectionEnabled()
                 && (timeSinceTick = TickRate.INSTANCE.getTimeSinceLastTick())
-                    > (float) HighwayBuilder.getLagThreshold()) { // was: J6PuzyzqvmhV
+                    > (float) HighwayBuilder.getLagThreshold()) {
             MusheorSystem.debug("Lag detected, pausing...", new Object[0]);
             PlayerUtils.setAutoWalkActive(false);
             return true;
@@ -540,10 +535,10 @@ public class WorldUtils {
             gatherItemIndex = 0;
             return;
         }
-        if (!PlayerUtils.isGatheringItem()) { // was: BT1BimvycZZjsYS
+        if (!PlayerUtils.isGatheringItem()) {
             ItemStack item = items.get(gatherItemIndex);
             PlayerUtils.setAutoWalkActive(false);
-            PlayerUtils.startGatherItem(item, false); // was: jOdDDFXSeWl4(Item,boolean)
+            PlayerUtils.startGatherItem(item, false);
             MusheorSystem.debug("Gathering item: %s", item);
             ++gatherItemIndex;
         }
@@ -566,16 +561,16 @@ public class WorldUtils {
             case 3: dz = -1; dx = -1; break;
             case 7: dz =  1; dx =  1; break;
         }
-        assert (WorldUtils.mc.field_1724 != null && WorldUtils.mc.field_1687 != null);
+        assert (WorldUtils.mc.player != null && WorldUtils.mc.world != null);
         BlockPos feetPos = WorldUtils.mc.player.getBlockPos()
-            .method_33096(WorldUtils.mc.player.getY() - 1); // withY(y-1)
+            .withY((int)(WorldUtils.mc.player.getY() - 1));
         BlockPos solidPos = null;
         for (int i = 0; i <= 8; ++i) {
-            int nx = WorldUtils.mc.player.getX() + dx * i;
-            int nz = WorldUtils.mc.player.getZ() + dz * i;
-            BlockPos candidate = new BlockPos(nx, WorldUtils.mc.player.getY() - 1, nz);
+            int nx = (int) WorldUtils.mc.player.getX() + dx * i;
+            int nz = (int) WorldUtils.mc.player.getZ() + dz * i;
+            BlockPos candidate = new BlockPos(nx, (int)(WorldUtils.mc.player.getY() - 1), nz);
             if (WorldUtils.mc.world.getBlockState(candidate).getBlock()
-                    .method_9564().method_51367()) continue; // getDefaultState().isOpaque() - skip solid
+                    .getDefaultState().isSolid()) continue;
             solidPos = candidate;
             break;
         }
@@ -585,14 +580,14 @@ public class WorldUtils {
 
     /** Returns the Block at the given BlockPos. */
     public static Block getBlockAt(BlockPos pos) { // was: WOqvNwnejoKApoa
-        assert (WorldUtils.mc.field_1687 != null && WorldUtils.mc.field_1724 != null);
-        return WorldUtils.mc.world.getBlockState(pos).getBlock(); // getBlockState().getBlock()
+        assert (WorldUtils.mc.world != null && WorldUtils.mc.player != null);
+        return WorldUtils.mc.world.getBlockState(pos).getBlock();
     }
 
-    /** Sends a START_DESTROY_BLOCK (dig) packet to the server. */
+    /** Sends a STOP_DESTROY_BLOCK packet to the server. */
     public static void sendDigPacket(BlockPos pos, Direction side) { // was: TAdu5cndwWu3A1(BlockPos,Direction)
-        Objects.requireNonNull(mc.method_1562()).method_52787( // getNetworkHandler().sendPacket
-            (class_2596) new class_2846(class_2846.class_2847.field_12973, pos, side)); // Action.START_DESTROY_BLOCK
+        Objects.requireNonNull(mc.getNetworkHandler()).sendPacket(
+            (Packet<?>) new PlayerActionC2SPacket(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos, side));
     }
 
     /** Returns the 2D horizontal distance (XZ plane) between two BlockPos. */
@@ -604,10 +599,10 @@ public class WorldUtils {
 
     /**
      * Checks a column of blocks ahead of the player (height 3 for normal, 4 for
-     * elytra mode) for non-air, non-fluid obstructions and stops walking if found.
+     * elytra mode) for non-air, non-sign obstructions and stops walking if found.
      */
     public static void checkForwardCollisions() { // was: gBxN0D8GSyidOa
-        assert (WorldUtils.mc.field_1724 != null && WorldUtils.mc.field_1687 != null);
+        assert (WorldUtils.mc.player != null && WorldUtils.mc.world != null);
         int dx = 0, dz = 0;
         Direction8 dir = HighwayBuilder.getDirection();
         switch (dir.ordinal()) {
@@ -621,15 +616,15 @@ public class WorldUtils {
             case 2: dx = -1;           break;
         }
         int height = 0;
-        if (HighwayBuilder.getBuildMode() == HighwayBuilder.BuildMode.NORMAL) height = 3;    // was: e4uKoS
-        if (HighwayBuilder.getBuildMode() == HighwayBuilder.BuildMode.ELYTRA)  height = 4;   // was: flZYoiXwrl
+        if (HighwayBuilder.getBuildMode() == HighwayBuilder.BuildMode.NORMAL) height = 3;
+        if (HighwayBuilder.getBuildMode() == HighwayBuilder.BuildMode.ELYTRA)  height = 4;
         for (int i = 0; i < height; ++i) {
-            BlockPos ahead = WorldUtils.mc.player.getBlockPos().method_10069(dx, i, dz);
-            if (WorldUtils.mc.world.getBlockState(ahead).isAir()         // isAir
-                    || WorldUtils.mc.world.getBlockState(ahead).getBlock() instanceof class_2508) continue; // FluidBlock
-            if (WorldUtils.mc.world.method_8316(ahead).method_15772() != class_3612.field_15908
-                    || WorldUtils.mc.world.method_8316(ahead).method_15772() != class_3612.field_15907
-                    || WorldUtils.mc.world.getBlockState(ahead).getBlock() != Blocks.field_10036) {
+            BlockPos ahead = WorldUtils.mc.player.getBlockPos().add(dx, i, dz);
+            if (WorldUtils.mc.world.getBlockState(ahead).isAir()
+                    || WorldUtils.mc.world.getBlockState(ahead).getBlock() instanceof SignBlock) continue;
+            if (WorldUtils.mc.world.getFluidState(ahead).getFluid() != Fluids.LAVA
+                    || WorldUtils.mc.world.getFluidState(ahead).getFluid() != Fluids.FLOWING_LAVA
+                    || WorldUtils.mc.world.getBlockState(ahead).getBlock() != Blocks.FIRE) {
                 PlayerUtils.setAutoWalkActive(false);
             }
             MusheorSystem.debug("Collision detected in front of the player", new Object[0]);
@@ -641,7 +636,7 @@ public class WorldUtils {
      * player from falling into a gap. Returns true if a block was placed.
      */
     public static boolean placeSafetyBlock() { // was: PROcSc3gv
-        assert (WorldUtils.mc.field_1724 != null && WorldUtils.mc.field_1687 != null);
+        assert (WorldUtils.mc.player != null && WorldUtils.mc.world != null);
         int dx = 0, dz = 0;
         Direction8 dir = HighwayBuilder.getDirection();
         switch (dir.ordinal()) {
@@ -650,45 +645,45 @@ public class WorldUtils {
             case 3: dx = dz = -1;     break;
             case 7: dx = dz =  1;     break;
         }
-        BlockPos below = WorldUtils.mc.player.getBlockPos().method_10069(dx, -1, dz);
-        if (WorldUtils.mc.world.getBlockState(below).isAir()) { // isAir
-            InventoryManager.equipItem(Items.field_8328); // Items.ICE (or obsidian depending on mode)
-            WorldUtils.placeBlockPacket(below, Direction.field_11033); // Direction.DOWN
+        BlockPos below = WorldUtils.mc.player.getBlockPos().add(dx, -1, dz);
+        if (WorldUtils.mc.world.getBlockState(below).isAir()) {
+            InventoryManager.equipItem(Items.NETHERRACK);
+            WorldUtils.placeBlockPacket(below, Direction.DOWN);
             return true;
         }
         return false;
     }
 
     /** Returns true if there is an ItemEntity with the given item type within 10 blocks. */
-    public static boolean isItemNearby(ItemStack item) { // was: Y9BgxR
-        if (WorldUtils.mc.field_1687 == null || WorldUtils.mc.field_1724 == null) return false;
+    public static boolean isItemNearby(Item item) { // was: Y9BgxR
+        if (WorldUtils.mc.world == null || WorldUtils.mc.player == null) return false;
         int radius = 10;
-        class_238 box = new class_238(
+        Box box = new Box(
             WorldUtils.mc.player.getX() - radius,
             WorldUtils.mc.player.getY() - radius,
             WorldUtils.mc.player.getZ() - radius,
             WorldUtils.mc.player.getX() + radius, 122,
             WorldUtils.mc.player.getZ() + radius);
-        List<?> list = WorldUtils.mc.world.method_8390(class_1542.class, box,
-            entity -> entity.method_6983().getStack() == item); // getStack().getItem()
+        List<?> list = WorldUtils.mc.world.getEntitiesByClass(ItemEntity.class, box,
+            entity -> entity.getStack().getItem() == item);
         return !list.isEmpty();
     }
 
     /** Finds the nearest ItemEntity with the given item type and tells Baritone to path to it. */
-    public static void pathToNearestItem(ItemStack item) { // was: xG2PP8jo4RWLS(Item)
-        if (WorldUtils.mc.field_1724 == null || WorldUtils.mc.field_1687 == null) return;
-        class_1542 nearest = null;
+    public static void pathToNearestItem(Item item) { // was: xG2PP8jo4RWLS(Item)
+        if (WorldUtils.mc.player == null || WorldUtils.mc.world == null) return;
+        ItemEntity nearest = null;
         double nearestDist = Double.MAX_VALUE;
-        for (class_1297 entity : WorldUtils.mc.world.method_18112()) { // getEntities
+        for (Entity entity : WorldUtils.mc.world.getEntities()) {
             double dist;
-            if (!(entity instanceof class_1542 itemEntity)
-                    || itemEntity.method_6983().getStack() != item
-                    || !((dist = entity.method_5858((class_1297) WorldUtils.mc.field_1724)) < nearestDist)) continue;
+            if (!(entity instanceof ItemEntity itemEntity)
+                    || itemEntity.getStack().getItem() != item
+                    || !((dist = entity.squaredDistanceTo((Entity) WorldUtils.mc.player)) < nearestDist)) continue;
             nearestDist = dist;
             nearest = itemEntity;
         }
         if (nearest != null) {
-            PathingHelper.pathToPos(nearest.getBlockPos()); // was: S7TLszvzENsW7
+            PathingHelper.pathToPos(nearest.getBlockPos());
         } else {
             ChatUtils.error("No matching item found nearby.", new Object[0]);
         }
@@ -696,35 +691,33 @@ public class WorldUtils {
 
     /** Converts yaw/pitch angles to a Minecraft Direction (the direction the player is facing). */
     public static Direction getFacingFromAngles(float yaw, float pitch) { // was: mp3zoXQFKUKYj5(float,float)
-        if (pitch > 60.0f)  return Direction.field_11033; // DOWN
-        if (pitch < -60.0f) return Direction.field_11036; // UP
+        if (pitch > 60.0f)  return Direction.DOWN;
+        if (pitch < -60.0f) return Direction.UP;
         if ((yaw %= 360.0f) < 0.0f) yaw += 360.0f;
-        if (yaw >= 315.0f || yaw < 45.0f)   return Direction.field_11035; // NORTH
-        if (yaw >= 45.0f  && yaw < 135.0f)  return Direction.field_11039; // EAST
-        if (yaw >= 135.0f && yaw < 225.0f)  return Direction.field_11043; // SOUTH
-        return Direction.field_11034;                                       // WEST
+        if (yaw >= 315.0f || yaw < 45.0f)   return Direction.SOUTH;
+        if (yaw >= 45.0f  && yaw < 135.0f)  return Direction.WEST;
+        if (yaw >= 135.0f && yaw < 225.0f)  return Direction.NORTH;
+        return Direction.EAST;
     }
 
     /** Returns the player's current facing direction as a Direction8 (8-cardinal enum). */
     public static Direction8 getPlayerFacing() { // was: eQlnaotm4pUDUmJT
-        assert (WorldUtils.mc.field_1724 != null);
-        return Direction8.fromYaw(WorldUtils.mc.player.method_36454()); // getYaw
+        assert (WorldUtils.mc.player != null);
+        return Direction8.fromYaw(WorldUtils.mc.player.getYaw());
     }
 
     // -------------------------------------------------------------------------
     // Inner enum: Direction8 — 8-direction compass for highway directions
     // -------------------------------------------------------------------------
     public static final class Direction8 extends Enum<Direction8> {
-        // Ordinal order matches: SOUTH(4), NORTH_EAST(1→? depends on ordinal), EAST(2?)...
-        // Mapped by coordinate math in BlockPositions/WorldUtils:
-        public static final /* enum */ Direction8 SOUTH      = new Direction8(); // was: Q5FUNqd0ALfl,  ordinal 0
-        public static final /* enum */ Direction8 SOUTH_EAST = new Direction8(); // was: CsEhJrV,       ordinal 1
-        public static final /* enum */ Direction8 EAST       = new Direction8(); // was: v5UhyO9eEd7n,  ordinal 2 (actually mapped WEST by coord!)
-        public static final /* enum */ Direction8 NORTH_EAST = new Direction8(); // was: aiRs4cu,       ordinal 3
-        public static final /* enum */ Direction8 NORTH      = new Direction8(); // was: vSouwXdh7,     ordinal 4
-        public static final /* enum */ Direction8 NORTH_WEST = new Direction8(); // was: ZOY41p,        ordinal 5
-        public static final /* enum */ Direction8 WEST       = new Direction8(); // was: S8iuqKQCrJM02b, ordinal 6 (mapped EAST by coord!)
-        public static final /* enum */ Direction8 SOUTH_WEST = new Direction8(); // was: E8moug3IELf8,  ordinal 7
+        public static final /* enum */ Direction8 SOUTH      = new Direction8(); // ordinal 0
+        public static final /* enum */ Direction8 SOUTH_EAST = new Direction8(); // ordinal 1
+        public static final /* enum */ Direction8 EAST       = new Direction8(); // ordinal 2
+        public static final /* enum */ Direction8 NORTH_EAST = new Direction8(); // ordinal 3
+        public static final /* enum */ Direction8 NORTH      = new Direction8(); // ordinal 4
+        public static final /* enum */ Direction8 NORTH_WEST = new Direction8(); // ordinal 5
+        public static final /* enum */ Direction8 WEST       = new Direction8(); // ordinal 6
+        public static final /* enum */ Direction8 SOUTH_WEST = new Direction8(); // ordinal 7
 
         private static final /* synthetic */ Direction8[] VALUES;
 

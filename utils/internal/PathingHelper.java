@@ -6,12 +6,12 @@ import baritone.api.pathing.goals.Goal;
 import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.pathing.goals.GoalNear;
 import baritone.api.pathing.goals.GoalXZ;
-import net.minecraft.BlockPos;  // BlockPos
-import net.minecraft.MinecraftClient;   // MinecraftClient
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.client.MinecraftClient;
 
 /** Thin wrapper around the Baritone API for common pathing operations. */
 public class PathingHelper {
-    private static final MinecraftClient mc = MinecraftClient.method_1551(); // MinecraftClient.getInstance() — was: ypiXcEk
+    private static final MinecraftClient mc = MinecraftClient.getInstance(); // was: ypiXcEk, method_1551
 
     private PathingHelper() {}
 

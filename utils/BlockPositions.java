@@ -6,7 +6,7 @@ import meteordevelopment.meteorclient.MeteorClient;
 import musheor.modules.automation.HighwayBuilder;
 import musheor.utils.WorldUtils;
 import musheor.utils.internal.HighwayState;
-import net.minecraft.BlockPos; // BlockPos
+import net.minecraft.util.math.BlockPos;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -168,7 +168,7 @@ public class BlockPositions {
         HighwayState state = HighwayState.getInstance();
         boolean hasWalls = HighwayBuilder.hasWalls();
         int width = HighwayBuilder.getWidth();
-        assert (MeteorClient.mc.field_1724 != null);
+        assert (MeteorClient.mc.player != null);
         int playerX = MeteorClient.mc.player.getX();
         int playerY = MeteorClient.mc.player.getY();
         int playerZ = MeteorClient.mc.player.getZ();
@@ -221,7 +221,7 @@ public class BlockPositions {
         HighwayState state = HighwayState.getInstance();
         boolean hasWalls = HighwayBuilder.hasWalls();
         int width = HighwayBuilder.getWidth();
-        assert (MeteorClient.mc.field_1724 != null);
+        assert (MeteorClient.mc.player != null);
 
         // Initialize origin from player position if not set
         if (state.getAlignStartX() == null) state.setAlignStartX(MeteorClient.mc.player.getX());
@@ -277,7 +277,7 @@ public class BlockPositions {
         HighwayState state = HighwayState.getInstance();
         boolean hasWalls = HighwayBuilder.hasWalls();
         int width = HighwayBuilder.getWidth();
-        assert (MeteorClient.mc.field_1724 != null);
+        assert (MeteorClient.mc.player != null);
 
         if (state.getAlignStartX() == null) state.setAlignStartX(MeteorClient.mc.player.getX());
         if (state.getHighwayY()     == null) state.setHighwayY(MeteorClient.mc.player.getY());
@@ -389,7 +389,7 @@ public class BlockPositions {
         HighwayState state = HighwayState.getInstance();
         int width = HighwayBuilder.getWidth();
         if (HighwayBuilder.getDirection() == null) return new BlockPos[0];
-        assert (MeteorClient.mc.field_1724 != null);
+        assert (MeteorClient.mc.player != null);
 
         if (state.getAlignStartX() == null) state.setAlignStartX(MeteorClient.mc.player.getX());
         if (state.getHighwayY()     == null) state.setHighwayY(MeteorClient.mc.player.getY());
@@ -491,7 +491,7 @@ public class BlockPositions {
         HighwayState state = HighwayState.getInstance();
         int width = HighwayBuilder.getWidth();
         if (HighwayBuilder.getDirection() == null) return new BlockPos[0];
-        assert (MeteorClient.mc.field_1724 != null);
+        assert (MeteorClient.mc.player != null);
 
         if (state.getAlignStartX() == null) state.setAlignStartX(MeteorClient.mc.player.getX());
         if (state.getHighwayY()     == null) state.setHighwayY(MeteorClient.mc.player.getY());
@@ -566,7 +566,7 @@ public class BlockPositions {
         HighwayState state = HighwayState.getInstance();
         int width = HighwayBuilder.getWidth();
         if (HighwayBuilder.getDirection() == null) return new BlockPos[0];
-        assert (MeteorClient.mc.field_1724 != null);
+        assert (MeteorClient.mc.player != null);
 
         if (state.getAlignStartX() == null) state.setAlignStartX(MeteorClient.mc.player.getX());
         if (state.getHighwayY()     == null) state.setHighwayY(MeteorClient.mc.player.getY());
@@ -682,7 +682,7 @@ public class BlockPositions {
         if (width % 2 == 0) { halfHigh = halfLow = width / 2; }
         else                 { halfHigh = halfLow = (width - 1) / 2; }
 
-        assert (MeteorClient.mc.field_1724 != null);
+        assert (MeteorClient.mc.player != null);
         if (state.getAlignStartX() == null) state.setAlignStartX(MeteorClient.mc.player.getX());
         if (state.getHighwayY()     == null) state.setHighwayY(MeteorClient.mc.player.getY());
         if (state.getAlignStartZ()  == null) state.setAlignStartZ(MeteorClient.mc.player.getZ());

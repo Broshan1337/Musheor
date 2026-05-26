@@ -23,9 +23,9 @@ import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import musheor.commands.RestockConfig;
 import musheor.compat.VersionHelper;
 import musheor.utils.hud.CustomHudButton;
-import net.minecraft.class_2487;  // NbtCompound
-import net.minecraft.class_2499;  // NbtList
-import net.minecraft.class_2520;  // NbtElement
+import net.minecraft.nbt.NbtCompound;
+import net.minecraft.nbt.NbtList;
+import net.minecraft.nbt.NbtElement;
 
 /**
  * Musheor's global System singleton, registered alongside Meteor's systems.
@@ -283,31 +283,31 @@ public class MusheorSystem extends System<MusheorSystem> {
     }
 
     @Override
-    public class_2487 toTag() { // NbtCompound
-        class_2487 tag = new class_2487();
-        tag.method_10566("settings", (class_2520) this.settings.toTag());
-        tag.method_10566("restock_containers", (class_2520) RestockConfig.toTag());
-        class_2499 buttonList = new class_2499();
+    public NbtCompound toTag() {
+        NbtCompound tag = new NbtCompound();
+        tag.put("settings", (NbtElement) this.settings.toTag());
+        tag.put("restock_containers", (NbtElement) RestockConfig.toTag());
+        NbtList buttonList = new NbtList();
         for (CustomHudButton button : this.customButtons) {
             buttonList.add(button.toTag());
         }
-        tag.method_10566("screen-button-editor", (class_2520) buttonList);
+        tag.put("screen-button-editor", (NbtElement) buttonList);
         return tag;
     }
 
     @Override
-    public MusheorSystem fromTag(class_2487 tag) {
-        if (tag.method_10545("settings")) {
+    public MusheorSystem fromTag(NbtCompound tag) {
+        if (tag.contains("settings")) {
             this.settings.fromTag(VersionHelper.get().getCompound(tag, "settings"));
         }
-        if (tag.method_10545("restock_containers")) {
-            RestockConfig.fromTag(VersionHelper.get().getCompound(tag, "restock_containers")); // was: jOdDDFXSeWl4
+        if (tag.contains("restock_containers")) {
+            RestockConfig.fromTag(VersionHelper.get().getCompound(tag, "restock_containers"));
         }
         this.customButtons.clear();
-        if (VersionHelper.get().supportsHudButtons() && tag.method_10545("custom_hud_buttons")) {
-            class_2499 list = VersionHelper.get().getList(tag, "custom_hud_buttons", 10);
-            for (class_2520 element : list) {
-                CustomHudButton button = CustomHudButton.fromTag((class_2487) element); // was: mp3zoXQFKUKYj5
+        if (VersionHelper.get().supportsHudButtons() && tag.contains("custom_hud_buttons")) {
+            NbtList list = VersionHelper.get().getList(tag, "custom_hud_buttons", 10);
+            for (NbtElement element : list) {
+                CustomHudButton button = CustomHudButton.fromTag((NbtCompound) element);
                 this.customButtons.add(button);
             }
         }

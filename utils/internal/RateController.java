@@ -3,7 +3,7 @@ package musheor.utils.internal;
 
 import musheor.modules.hud.HudInfoPlus;
 import musheor.utils.system.MusheorSystem;
-import net.minecraft.MinecraftClient;  // MinecraftClient
+import net.minecraft.client.MinecraftClient;
 
 /**
  * Guards block-place and inventory-slot packets against exceeding server rate limits.
@@ -18,7 +18,7 @@ public class RateController {
      * counter is below 9 (the hard cap before anti-cheat triggers).
      */
     public static boolean checkPlaceRate() { // was: qy8UwM99rVr
-        if (MinecraftClient.method_1551().player.method_68878()) { // player.isCreative()
+        if (MinecraftClient.getInstance().player.isCreative()) { // was: method_68878
             return true;
         }
         return HudInfoPlus.getPlacePacketCount() < 9; // was: Y1fGfDLuV()
@@ -30,7 +30,7 @@ public class RateController {
      * below the user-configured limit in MusheorSystem settings.
      */
     public static boolean checkInventoryRate() { // was: OwcAnTXUsd
-        if (MinecraftClient.method_1551().player.method_68878()) { // player.isCreative()
+        if (MinecraftClient.getInstance().player.isCreative()) { // was: method_68878
             return true;
         }
         return HudInfoPlus.getInvPacketCount() < (Integer) MusheorSystem.Manager.invPacketLimit.get(); // was: kBQdZKStLMVDV()

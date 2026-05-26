@@ -12,218 +12,267 @@ import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import musheor.utils.system.MusheorSystem;
-import net.minecraft.class_1922;
-import net.minecraft.Block;
-import net.minecraft.BlockPos;
-import net.minecraft.Direction;
-import net.minecraft.BlockState;
-import net.minecraft.MinecraftClient;
+import net.minecraft.world.BlockView;
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.MapColor;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
+import net.minecraft.client.MinecraftClient;
 
+/**
+ * Renders highlighted block outlines and fills for various rendering modes.
+ *
+ * Public API (all overloads named renderBlocks, renderFaceLines, renderFaceQuad):
+ *   renderBlocks(event, List<Pair<BlockPos,Block>>)       — managed colors from MusheorSystem config
+ *   renderBlocks(event, List<BlockPos>)                   — simple positions, uses current world block types
+ *   renderBlocks(event, List<BlockPos>, Block)            — treats every position as the given block type
+ *   renderBlocks(event, List<BlockPos>, Color, Color, ShapeMode) — explicit colors
+ *   renderBlocks(event, BlockPos)                         — single-block shorthand
+ *   renderBlocks(event, BlockPos, Block)                  — single-block + explicit type
+ *   renderBlocks(event, BlockPos, Color, Color, ShapeMode)— single-block + explicit colors
+ *
+ * Internal helpers:
+ *   renderMapped  — groups a block list by MapColor, renders each colour group separately
+ *   renderUniform — renders a block list using the configured uniform colour
+ *   renderSet     — lowest-level; renders a Set<BlockPos> with explicit colours
+ *   renderFaceLines / renderFaceQuad — render a single block face (lines / filled quad)
+ *   shouldRenderEdge — returns true when a given edge of a face should be drawn
+ */
 public class RenderUtils {
-    public static void jOdDDFXSeWl4(Render3DEvent render3DEvent, List<Pair<BlockPos, Block>> list) {
-        boolean bl;
-        if (MinecraftClient.getInstance().player == null || MinecraftClient.getInstance().world == null) {
-            return;
-        }
-        if (list == null || list.isEmpty()) {
-            return;
-        }
-        boolean bl2 = (Boolean)MusheorSystem.Manager.renderLines.get() != false && (MusheorSystem.Manager.renderShape.get() == ShapeMode.Lines || MusheorSystem.Manager.renderShape.get() == ShapeMode.Both);
-        boolean bl3 = bl = (Boolean)MusheorSystem.Manager.renderSides.get() != false && (MusheorSystem.Manager.renderShape.get() == ShapeMode.Sides || MusheorSystem.Manager.renderShape.get() == ShapeMode.Both);
-        if (!bl2 && !bl) {
-            return;
-        }
+
+    // -------------------------------------------------------------------------
+    // Public entry points
+    // -------------------------------------------------------------------------
+
+    /** Renders a list of (position, block-type) pairs using colours from MusheorSystem config. */
+    public static void renderBlocks(Render3DEvent event, List<Pair<BlockPos, Block>> list) { // was: jOdDDFXSeWl4
+        if (MinecraftClient.getInstance().player == null || MinecraftClient.getInstance().world == null) return;
+        if (list == null || list.isEmpty()) return;
+
+        boolean renderLines = (Boolean) MusheorSystem.Manager.renderLines.get() != false
+            && (MusheorSystem.Manager.renderShape.get() == ShapeMode.Lines
+                || MusheorSystem.Manager.renderShape.get() == ShapeMode.Both);
+        boolean renderSides = (Boolean) MusheorSystem.Manager.renderSides.get() != false
+            && (MusheorSystem.Manager.renderShape.get() == ShapeMode.Sides
+                || MusheorSystem.Manager.renderShape.get() == ShapeMode.Both);
+        if (!renderLines && !renderSides) return;
+
         if (MusheorSystem.Manager.renderType.get() == MusheorSystem.RenderType.Mapped) {
-            RenderUtils.jOdDDFXSeWl4(render3DEvent, list, bl2, bl);
+            RenderUtils.renderMapped(event, list, renderLines, renderSides);
         } else {
-            RenderUtils.mp3zoXQFKUKYj5(render3DEvent, list, bl2, bl);
+            RenderUtils.renderUniform(event, list, renderLines, renderSides);
         }
     }
 
-    public static void mp3zoXQFKUKYj5(Render3DEvent render3DEvent, List<BlockPos> list) {
-        RenderUtils.jOdDDFXSeWl4(render3DEvent, list, null);
+    /** Renders a list of positions, inferring each block type from the current world. */
+    public static void renderBlocks(Render3DEvent event, List<BlockPos> list) { // was: mp3zoXQFKUKYj5
+        RenderUtils.renderBlocks(event, list, (Block) null);
     }
 
-    public static void jOdDDFXSeWl4(Render3DEvent render3DEvent, List<BlockPos> list, Block Block2) {
-        MinecraftClient MinecraftClient2 = MinecraftClient.getInstance();
-        if (MinecraftClient2.player == null || MinecraftClient2.world == null) {
-            return;
-        }
-        if (list == null || list.isEmpty()) {
-            return;
-        }
-        List<Object> list2 = Block2 != null ? list.stream().map(BlockPos2 -> Pair.of((Object)BlockPos2, (Object)Block2)).collect(Collectors.toList()) : list.stream().map(BlockPos2 -> {
-            Block Block2 = MinecraftClient2.world.getBlockState(BlockPos2).getBlock();
-            return Pair.of((Object)BlockPos2, (Object)Block2);
-        }).collect(Collectors.toList());
-        RenderUtils.jOdDDFXSeWl4(render3DEvent, list2);
+    /**
+     * Renders a list of positions.
+     * If {@code block} is non-null, all positions are treated as that block type;
+     * otherwise each position's actual world block is used.
+     */
+    public static void renderBlocks(Render3DEvent event, List<BlockPos> list, Block block) { // was: jOdDDFXSeWl4
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.player == null || mc.world == null) return;
+        if (list == null || list.isEmpty()) return;
+
+        List<Object> pairs = block != null
+            ? list.stream().map(pos -> Pair.of((Object) pos, (Object) block)).collect(Collectors.toList())
+            : list.stream().map(pos -> {
+                Block b = mc.world.getBlockState(pos).getBlock();
+                return Pair.of((Object) pos, (Object) b);
+              }).collect(Collectors.toList());
+        RenderUtils.renderBlocks(event, pairs);
     }
 
-    public static void jOdDDFXSeWl4(Render3DEvent render3DEvent, List<BlockPos> list, Color color, Color color2, ShapeMode shapeMode) {
-        boolean bl;
-        MinecraftClient MinecraftClient2 = MinecraftClient.getInstance();
-        if (MinecraftClient2.player == null || MinecraftClient2.world == null) {
-            return;
-        }
-        if (list == null || list.isEmpty()) {
-            return;
-        }
-        boolean bl2 = shapeMode == ShapeMode.Lines || shapeMode == ShapeMode.Both;
-        boolean bl3 = bl = shapeMode == ShapeMode.Sides || shapeMode == ShapeMode.Both;
-        if (!bl2 && !bl) {
-            return;
-        }
-        HashSet<BlockPos> hashSet = new HashSet<BlockPos>(list);
-        RenderUtils.jOdDDFXSeWl4(render3DEvent, hashSet, bl2, bl, color, color2);
+    /** Renders a list of positions with explicit line/side colours and shape mode. */
+    public static void renderBlocks(Render3DEvent event, List<BlockPos> list, Color lineColor, Color sideColor, ShapeMode shapeMode) { // was: jOdDDFXSeWl4
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.player == null || mc.world == null) return;
+        if (list == null || list.isEmpty()) return;
+
+        boolean renderLines = shapeMode == ShapeMode.Lines || shapeMode == ShapeMode.Both;
+        boolean renderSides = shapeMode == ShapeMode.Sides || shapeMode == ShapeMode.Both;
+        if (!renderLines && !renderSides) return;
+
+        HashSet<BlockPos> set = new HashSet<BlockPos>(list);
+        RenderUtils.renderSet(event, set, renderLines, renderSides, lineColor, sideColor);
     }
 
-    public static void jOdDDFXSeWl4(Render3DEvent render3DEvent, BlockPos BlockPos2) {
-        RenderUtils.mp3zoXQFKUKYj5(render3DEvent, List.of(BlockPos2));
+    /** Single-block shorthand — infers block type from world. */
+    public static void renderBlocks(Render3DEvent event, BlockPos pos) { // was: jOdDDFXSeWl4
+        RenderUtils.renderBlocks(event, List.of(pos));
     }
 
-    public static void jOdDDFXSeWl4(Render3DEvent render3DEvent, BlockPos BlockPos2, Block Block2) {
-        RenderUtils.jOdDDFXSeWl4(render3DEvent, List.of(BlockPos2), Block2);
+    /** Single-block shorthand — treats the position as the given block type. */
+    public static void renderBlocks(Render3DEvent event, BlockPos pos, Block block) { // was: jOdDDFXSeWl4
+        RenderUtils.renderBlocks(event, List.of(pos), block);
     }
 
-    public static void jOdDDFXSeWl4(Render3DEvent render3DEvent, BlockPos BlockPos2, Color color, Color color2, ShapeMode shapeMode) {
-        RenderUtils.jOdDDFXSeWl4(render3DEvent, List.of(BlockPos2), color, color2, shapeMode);
+    /** Single-block shorthand — explicit colours. */
+    public static void renderBlocks(Render3DEvent event, BlockPos pos, Color lineColor, Color sideColor, ShapeMode shapeMode) { // was: jOdDDFXSeWl4
+        RenderUtils.renderBlocks(event, List.of(pos), lineColor, sideColor, shapeMode);
     }
 
-    private static void jOdDDFXSeWl4(Render3DEvent render3DEvent, List<Pair<BlockPos, Block>> list, boolean bl, boolean bl2) {
-        MinecraftClient MinecraftClient2 = MinecraftClient.getInstance();
-        HashMap<Integer, Set> hashMap = new HashMap<Integer, Set>();
+    // -------------------------------------------------------------------------
+    // Private dispatch helpers
+    // -------------------------------------------------------------------------
+
+    /**
+     * Groups blocks by their MapColor value and renders each group in that colour,
+     * using alpha values from MusheorSystem config.
+     */
+    private static void renderMapped(Render3DEvent event, List<Pair<BlockPos, Block>> list, boolean renderLines, boolean renderSides) { // was: jOdDDFXSeWl4
+        MinecraftClient mc = MinecraftClient.getInstance();
+        HashMap<Integer, Set> byColor = new HashMap<Integer, Set>();
         for (Pair<BlockPos, Block> pair : list) {
-            BlockPos BlockPos2 = (BlockPos)pair.first();
-            Block object = (Block)pair.second();
-            BlockState BlockState2 = object.method_9564();
-            int n2 = BlockState2.method_26205((class_1922)MinecraftClient2.world, (BlockPos)BlockPos2).field_16011;
-            hashMap.computeIfAbsent(n2, n -> new HashSet()).add(BlockPos2);
+            BlockPos pos = (BlockPos) pair.first();
+            Block block = (Block) pair.second();
+            BlockState state = block.getDefaultState();
+            int colorInt = state.getMapColor((BlockView) mc.world, pos).color;
+            byColor.computeIfAbsent(colorInt, k -> new HashSet()).add(pos);
         }
-        int n3 = (Integer)MusheorSystem.Manager.renderLineAlpha.get();
-        int n4 = (Integer)MusheorSystem.Manager.renderSideAlpha.get();
-        for (Map.Entry entry : hashMap.entrySet()) {
-            int n5 = (Integer)entry.getKey();
-            Set set = (Set)entry.getValue();
-            int n6 = n5 >> 16 & 0xFF;
-            int n7 = n5 >> 8 & 0xFF;
-            int n8 = n5 & 0xFF;
-            Color color = new Color(n6, n7, n8, n3);
-            Color color2 = new Color(n6, n7, n8, n4);
-            RenderUtils.jOdDDFXSeWl4(render3DEvent, set, bl, bl2, color, color2);
+        int lineAlpha = (Integer) MusheorSystem.Manager.renderLineAlpha.get();
+        int sideAlpha = (Integer) MusheorSystem.Manager.renderSideAlpha.get();
+        for (Map.Entry entry : byColor.entrySet()) {
+            int colorInt = (Integer) entry.getKey();
+            Set set = (Set) entry.getValue();
+            int r = colorInt >> 16 & 0xFF;
+            int g = colorInt >> 8  & 0xFF;
+            int b = colorInt       & 0xFF;
+            Color lineColor = new Color(r, g, b, lineAlpha);
+            Color sideColor = new Color(r, g, b, sideAlpha);
+            RenderUtils.renderSet(event, set, renderLines, renderSides, lineColor, sideColor);
         }
     }
 
-    private static void mp3zoXQFKUKYj5(Render3DEvent render3DEvent, List<Pair<BlockPos, Block>> list, boolean bl, boolean bl2) {
+    /**
+     * Renders all blocks using the configured uniform line/side colours from MusheorSystem.
+     */
+    private static void renderUniform(Render3DEvent event, List<Pair<BlockPos, Block>> list, boolean renderLines, boolean renderSides) { // was: mp3zoXQFKUKYj5
         Set<BlockPos> set = list.stream().map(Pair::first).collect(Collectors.toSet());
-        RenderUtils.jOdDDFXSeWl4(render3DEvent, set, bl, bl2, (Color)MusheorSystem.Manager.renderLineColor.get(), (Color)MusheorSystem.Manager.renderSideColor.get());
+        RenderUtils.renderSet(event, set, renderLines, renderSides,
+            (Color) MusheorSystem.Manager.renderLineColor.get(),
+            (Color) MusheorSystem.Manager.renderSideColor.get());
     }
 
-    private static void jOdDDFXSeWl4(Render3DEvent render3DEvent, Set<BlockPos> set, boolean bl, boolean bl2, Color color, Color color2) {
-        MinecraftClient MinecraftClient2 = MinecraftClient.getInstance();
-        for (BlockPos BlockPos2 : set) {
-            for (Direction Direction2 : Direction.values()) {
-                BlockPos BlockPos3 = BlockPos2.offset(Direction2);
-                if (set.contains(BlockPos3)) continue;
-                if (bl) {
-                    RenderUtils.jOdDDFXSeWl4(render3DEvent, BlockPos2, Direction2, set, color);
+    /**
+     * Core renderer: iterates the set of positions and, for each exposed face,
+     * draws line edges and/or a filled quad depending on the flags.
+     */
+    private static void renderSet(Render3DEvent event, Set<BlockPos> set, boolean renderLines, boolean renderSides, Color lineColor, Color sideColor) { // was: jOdDDFXSeWl4
+        for (BlockPos pos : set) {
+            for (Direction dir : Direction.values()) {
+                BlockPos neighbor = pos.offset(dir);
+                if (set.contains(neighbor)) continue;
+                if (renderLines) {
+                    RenderUtils.renderFaceLines(event, pos, dir, set, lineColor);
                 }
-                if (!bl2) continue;
-                RenderUtils.jOdDDFXSeWl4(render3DEvent, BlockPos2, Direction2, color2);
+                if (!renderSides) continue;
+                RenderUtils.renderFaceQuad(event, pos, dir, sideColor);
             }
         }
     }
 
-    public static void jOdDDFXSeWl4(Render3DEvent render3DEvent, BlockPos BlockPos2, Direction Direction2, Set<BlockPos> set, Color color) {
-        double d = BlockPos2.getX();
-        double d2 = BlockPos2.getY();
-        double d3 = BlockPos2.getZ();
-        switch (Direction2) {
-            case field_11036: 
-            case field_11033: {
-                double d4;
-                double d5 = d4 = Direction2 == Direction.field_11036 ? d2 + 1.0 : d2;
-                if (RenderUtils.jOdDDFXSeWl4(BlockPos2, Direction2, Direction.field_11043, set)) {
-                    render3DEvent.renderer.line(d, d4, d3, d + 1.0, d4, d3, color);
-                }
-                if (RenderUtils.jOdDDFXSeWl4(BlockPos2, Direction2, Direction.field_11035, set)) {
-                    render3DEvent.renderer.line(d, d4, d3 + 1.0, d + 1.0, d4, d3 + 1.0, color);
-                }
-                if (RenderUtils.jOdDDFXSeWl4(BlockPos2, Direction2, Direction.field_11039, set)) {
-                    render3DEvent.renderer.line(d, d4, d3, d, d4, d3 + 1.0, color);
-                }
-                if (!RenderUtils.jOdDDFXSeWl4(BlockPos2, Direction2, Direction.field_11034, set)) break;
-                render3DEvent.renderer.line(d + 1.0, d4, d3, d + 1.0, d4, d3 + 1.0, color);
+    // -------------------------------------------------------------------------
+    // Face-level renderers
+    // -------------------------------------------------------------------------
+
+    /**
+     * Draws the visible edge lines of a single block face.
+     * An edge is skipped if the adjacent block in that direction is also in the set
+     * (unless the corner block is also present, which re-enables the edge).
+     */
+    public static void renderFaceLines(Render3DEvent event, BlockPos pos, Direction dir, Set<BlockPos> set, Color color) { // was: jOdDDFXSeWl4
+        double x = pos.getX();
+        double y = pos.getY();
+        double z = pos.getZ();
+        switch (dir) {
+            case UP:
+            case DOWN: {
+                double faceY = dir == Direction.UP ? y + 1.0 : y;
+                if (RenderUtils.shouldRenderEdge(pos, dir, Direction.NORTH, set))
+                    event.renderer.line(x, faceY, z, x + 1.0, faceY, z, color);
+                if (RenderUtils.shouldRenderEdge(pos, dir, Direction.SOUTH, set))
+                    event.renderer.line(x, faceY, z + 1.0, x + 1.0, faceY, z + 1.0, color);
+                if (RenderUtils.shouldRenderEdge(pos, dir, Direction.WEST, set))
+                    event.renderer.line(x, faceY, z, x, faceY, z + 1.0, color);
+                if (RenderUtils.shouldRenderEdge(pos, dir, Direction.EAST, set))
+                    event.renderer.line(x + 1.0, faceY, z, x + 1.0, faceY, z + 1.0, color);
                 break;
             }
-            case field_11043: 
-            case field_11035: {
-                double d6;
-                double d7 = d6 = Direction2 == Direction.field_11035 ? d3 + 1.0 : d3;
-                if (RenderUtils.jOdDDFXSeWl4(BlockPos2, Direction2, Direction.field_11036, set)) {
-                    render3DEvent.renderer.line(d, d2 + 1.0, d6, d + 1.0, d2 + 1.0, d6, color);
-                }
-                if (RenderUtils.jOdDDFXSeWl4(BlockPos2, Direction2, Direction.field_11033, set)) {
-                    render3DEvent.renderer.line(d, d2, d6, d + 1.0, d2, d6, color);
-                }
-                if (RenderUtils.jOdDDFXSeWl4(BlockPos2, Direction2, Direction.field_11039, set)) {
-                    render3DEvent.renderer.line(d, d2, d6, d, d2 + 1.0, d6, color);
-                }
-                if (!RenderUtils.jOdDDFXSeWl4(BlockPos2, Direction2, Direction.field_11034, set)) break;
-                render3DEvent.renderer.line(d + 1.0, d2, d6, d + 1.0, d2 + 1.0, d6, color);
+            case NORTH:
+            case SOUTH: {
+                double faceZ = dir == Direction.SOUTH ? z + 1.0 : z;
+                if (RenderUtils.shouldRenderEdge(pos, dir, Direction.UP, set))
+                    event.renderer.line(x, y + 1.0, faceZ, x + 1.0, y + 1.0, faceZ, color);
+                if (RenderUtils.shouldRenderEdge(pos, dir, Direction.DOWN, set))
+                    event.renderer.line(x, y, faceZ, x + 1.0, y, faceZ, color);
+                if (RenderUtils.shouldRenderEdge(pos, dir, Direction.WEST, set))
+                    event.renderer.line(x, y, faceZ, x, y + 1.0, faceZ, color);
+                if (RenderUtils.shouldRenderEdge(pos, dir, Direction.EAST, set))
+                    event.renderer.line(x + 1.0, y, faceZ, x + 1.0, y + 1.0, faceZ, color);
                 break;
             }
-            case field_11039: 
-            case field_11034: {
-                double d8;
-                double d9 = d8 = Direction2 == Direction.field_11034 ? d + 1.0 : d;
-                if (RenderUtils.jOdDDFXSeWl4(BlockPos2, Direction2, Direction.field_11036, set)) {
-                    render3DEvent.renderer.line(d8, d2 + 1.0, d3, d8, d2 + 1.0, d3 + 1.0, color);
-                }
-                if (RenderUtils.jOdDDFXSeWl4(BlockPos2, Direction2, Direction.field_11033, set)) {
-                    render3DEvent.renderer.line(d8, d2, d3, d8, d2, d3 + 1.0, color);
-                }
-                if (RenderUtils.jOdDDFXSeWl4(BlockPos2, Direction2, Direction.field_11043, set)) {
-                    render3DEvent.renderer.line(d8, d2, d3, d8, d2 + 1.0, d3, color);
-                }
-                if (!RenderUtils.jOdDDFXSeWl4(BlockPos2, Direction2, Direction.field_11035, set)) break;
-                render3DEvent.renderer.line(d8, d2, d3 + 1.0, d8, d2 + 1.0, d3 + 1.0, color);
+            case WEST:
+            case EAST: {
+                double faceX = dir == Direction.EAST ? x + 1.0 : x;
+                if (RenderUtils.shouldRenderEdge(pos, dir, Direction.UP, set))
+                    event.renderer.line(faceX, y + 1.0, z, faceX, y + 1.0, z + 1.0, color);
+                if (RenderUtils.shouldRenderEdge(pos, dir, Direction.DOWN, set))
+                    event.renderer.line(faceX, y, z, faceX, y, z + 1.0, color);
+                if (RenderUtils.shouldRenderEdge(pos, dir, Direction.NORTH, set))
+                    event.renderer.line(faceX, y, z, faceX, y + 1.0, z, color);
+                if (RenderUtils.shouldRenderEdge(pos, dir, Direction.SOUTH, set))
+                    event.renderer.line(faceX, y, z + 1.0, faceX, y + 1.0, z + 1.0, color);
             }
         }
     }
 
-    public static void jOdDDFXSeWl4(Render3DEvent render3DEvent, BlockPos BlockPos2, Direction Direction2, Color color) {
-        double d = BlockPos2.getX();
-        double d2 = BlockPos2.getY();
-        double d3 = BlockPos2.getZ();
-        switch (Direction2) {
-            case field_11036: {
-                render3DEvent.renderer.quad(d, d2 + 1.0, d3, d + 1.0, d2 + 1.0, d3, d + 1.0, d2 + 1.0, d3 + 1.0, d, d2 + 1.0, d3 + 1.0, color);
+    /** Draws a filled quad for a single block face. */
+    public static void renderFaceQuad(Render3DEvent event, BlockPos pos, Direction dir, Color color) { // was: jOdDDFXSeWl4
+        double x = pos.getX();
+        double y = pos.getY();
+        double z = pos.getZ();
+        switch (dir) {
+            case UP: {
+                event.renderer.quad(x, y + 1.0, z,  x + 1.0, y + 1.0, z,  x + 1.0, y + 1.0, z + 1.0,  x, y + 1.0, z + 1.0, color);
                 break;
             }
-            case field_11033: {
-                render3DEvent.renderer.quad(d, d2, d3, d, d2, d3 + 1.0, d + 1.0, d2, d3 + 1.0, d + 1.0, d2, d3, color);
+            case DOWN: {
+                event.renderer.quad(x, y, z,  x, y, z + 1.0,  x + 1.0, y, z + 1.0,  x + 1.0, y, z, color);
                 break;
             }
-            case field_11043: {
-                render3DEvent.renderer.quad(d, d2, d3, d + 1.0, d2, d3, d + 1.0, d2 + 1.0, d3, d, d2 + 1.0, d3, color);
+            case NORTH: {
+                event.renderer.quad(x, y, z,  x + 1.0, y, z,  x + 1.0, y + 1.0, z,  x, y + 1.0, z, color);
                 break;
             }
-            case field_11035: {
-                render3DEvent.renderer.quad(d, d2, d3 + 1.0, d, d2 + 1.0, d3 + 1.0, d + 1.0, d2 + 1.0, d3 + 1.0, d + 1.0, d2, d3 + 1.0, color);
+            case SOUTH: {
+                event.renderer.quad(x, y, z + 1.0,  x, y + 1.0, z + 1.0,  x + 1.0, y + 1.0, z + 1.0,  x + 1.0, y, z + 1.0, color);
                 break;
             }
-            case field_11039: {
-                render3DEvent.renderer.quad(d, d2, d3, d, d2 + 1.0, d3, d, d2 + 1.0, d3 + 1.0, d, d2, d3 + 1.0, color);
+            case WEST: {
+                event.renderer.quad(x, y, z,  x, y + 1.0, z,  x, y + 1.0, z + 1.0,  x, y, z + 1.0, color);
                 break;
             }
-            case field_11034: {
-                render3DEvent.renderer.quad(d + 1.0, d2, d3, d + 1.0, d2, d3 + 1.0, d + 1.0, d2 + 1.0, d3 + 1.0, d + 1.0, d2 + 1.0, d3, color);
+            case EAST: {
+                event.renderer.quad(x + 1.0, y, z,  x + 1.0, y, z + 1.0,  x + 1.0, y + 1.0, z + 1.0,  x + 1.0, y + 1.0, z, color);
             }
         }
     }
 
-    public static boolean jOdDDFXSeWl4(BlockPos BlockPos2, Direction Direction2, Direction Direction3, Set<BlockPos> set) {
-        return !set.contains(BlockPos2.offset(Direction3)) || set.contains(BlockPos2.offset(Direction2).offset(Direction3));
+    /**
+     * Returns true if the given edge of a face should be rendered.
+     *
+     * The edge runs along {@code edgeDir} on the face {@code faceDir} of {@code pos}.
+     * The edge is hidden when the neighbor block (in {@code edgeDir}) is also in the set
+     * AND the diagonal corner (faceDir + edgeDir) is NOT in the set.
+     */
+    public static boolean shouldRenderEdge(BlockPos pos, Direction faceDir, Direction edgeDir, Set<BlockPos> set) { // was: jOdDDFXSeWl4
+        return !set.contains(pos.offset(edgeDir)) || set.contains(pos.offset(faceDir).offset(edgeDir));
     }
 }
-
