@@ -8,7 +8,7 @@ import com.mojang.brigadier.context.CommandContext;
 import java.io.File;
 import java.io.IOException;
 import meteordevelopment.meteorclient.commands.Command;
-import net.minecraft.GuiGraphics;  // CommandSource
+import net.minecraft.server.command.ServerCommandSource;
 
 /**
  * .folder [subfolder]
@@ -22,17 +22,17 @@ public class FolderCommand extends Command {
     }
 
     @Override
-    public void build(LiteralArgumentBuilder<GuiGraphics> builder) {
+    public void build(LiteralArgumentBuilder<ServerCommandSource> builder) {
         // No argument → open .minecraft root
         builder.executes(ctx -> {
-            openFolder(FolderCommand.mc.field_1697); // mc.runDirectory
+            openFolder(FolderCommand.mc.runDirectory); // was: field_1697
             return 1;
         });
 
         // Optional subfolder argument with autocomplete
         builder.then(FolderCommand.argument("folder", (ArgumentType) StringArgumentType.word())
             .suggests((ctx, suggestionsBuilder) -> {
-                File mcDir = FolderCommand.mc.field_1697;
+                File mcDir = FolderCommand.mc.runDirectory; // was: field_1697
                 File[] subdirs = mcDir.listFiles(File::isDirectory);
                 if (subdirs != null) {
                     for (File dir : subdirs) {
@@ -43,7 +43,7 @@ public class FolderCommand extends Command {
             })
             .executes(ctx -> {
                 String folderName = StringArgumentType.getString((CommandContext) ctx, "folder");
-                File target = new File(FolderCommand.mc.field_1697, folderName);
+                File target = new File(FolderCommand.mc.runDirectory, folderName); // was: field_1697
                 if (!target.exists() || !target.isDirectory()) {
                     this.error("Folder not found: " + folderName, new Object[0]);
                     return 1;

@@ -6,11 +6,11 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import meteordevelopment.meteorclient.commands.Command;
 import musheor.utils.WorldUtils;
-import net.minecraft.ItemStack;   // ItemStack
-import net.minecraft.Items;   // Items
-import net.minecraft.GuiGraphics;   // CommandSource
-import net.minecraft.class_2287;   // ItemStackArgument
-import net.minecraft.class_7157;   // RegistryWrapper
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
+import net.minecraft.server.command.ServerCommandSource;
+import net.minecraft.command.argument.ItemStackArgumentType;
+import net.minecraft.command.CommandRegistryAccess;
 
 /**
  * .find <item>
@@ -24,12 +24,12 @@ public class FindItem extends Command {
     }
 
     @Override
-    public void build(LiteralArgumentBuilder<GuiGraphics> builder) {
-        builder.then(FindItem.argument("item", (ArgumentType) class_2287.method_9776((class_7157) REGISTRY_ACCESS))
+    public void build(LiteralArgumentBuilder<ServerCommandSource> builder) {
+        builder.then(FindItem.argument("item", (ArgumentType) ItemStackArgumentType.itemStack((CommandRegistryAccess) REGISTRY_ACCESS))
             .executes(ctx -> {
-                ItemStack stack = class_2287.method_9777((CommandContext) ctx, "item").method_9781(1, false);
-                if (stack != null && stack.getStack() != Items.field_8162) {
-                    WorldUtils.findAndPickupItem(stack.getStack()); // was: xG2PP8jo4RWLS(Item)
+                ItemStack stack = ItemStackArgumentType.getItemStackArgument((CommandContext) ctx, "item").createStack(1, false);
+                if (stack != null && stack.getItem() != Items.AIR) {
+                    WorldUtils.findAndPickupItem(stack.getItem()); // was: xG2PP8jo4RWLS(Item)
                 }
                 return 1;
             }));

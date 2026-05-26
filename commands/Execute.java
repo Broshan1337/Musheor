@@ -24,14 +24,14 @@ import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.commands.Command;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.loader.api.ModContainer;
-import net.minecraft.class_1657;   // PlayerEntity
-import net.minecraft.ItemStack;   // Item
-import net.minecraft.ItemStack;   // ItemStack
-import net.minecraft.class_1935;   // ItemConvertible
-import net.minecraft.GuiGraphics;   // CommandSource
-import net.minecraft.class_2960;   // Identifier
-import net.minecraft.MinecraftClient;    // MinecraftClient
-import net.minecraft.class_7923;   // Registries
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.ItemConvertible;
+import net.minecraft.server.command.ServerCommandSource;
+import net.minecraft.util.Identifier;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.registry.Registries;
 
 /**
  * .execute ClassName.methodName [arg1 arg2 ...]
@@ -59,13 +59,13 @@ public class Execute extends Command {
     }
 
     @Override
-    public void build(LiteralArgumentBuilder<GuiGraphics> builder) {
+    public void build(LiteralArgumentBuilder<ServerCommandSource> builder) {
         builder.then(Execute.argument("call", (ArgumentType) StringArgumentType.greedyString())
             .suggests(this::buildSuggestions)
             .executes(this::executeCall));
     }
 
-    private int executeCall(CommandContext<GuiGraphics> ctx) { // was: mp3zoXQFKUKYj5(CommandContext)
+    private int executeCall(CommandContext<ServerCommandSource> ctx) { // was: mp3zoXQFKUKYj5(CommandContext)
         String input = StringArgumentType.getString(ctx, "call");
         try {
             String[] parts = input.split(" ");
@@ -131,30 +131,30 @@ public class Execute extends Command {
             if (targetType == Float.TYPE   || targetType == Float.class)   return Float.valueOf(Float.parseFloat(value));
             if (targetType == Boolean.TYPE || targetType == Boolean.class) return Boolean.parseBoolean(value);
             if (targetType == Long.TYPE    || targetType == Long.class)    return Long.parseLong(value);
-            if (targetType == class_2960.class) return class_2960.method_60654(value); // Identifier.of
-            if (targetType == ItemStack.class) {
-                return class_7923.field_41178.method_63535(class_2960.method_60654(value)); // Registries.ITEM.get
+            if (targetType == Identifier.class) return Identifier.of(value);
+            if (targetType == Item.class) {
+                return Registries.ITEM.get(Identifier.of(value));
             }
-            if (targetType == ItemStack.class) { // ItemStack
+            if (targetType == ItemStack.class) {
                 String[] parts = value.split(":");
                 int count = 1;
-                ItemStack item;
+                Item item;
                 if (parts.length >= 2 && parts[0].equalsIgnoreCase("minecraft")) {
-                    item = (ItemStack) class_7923.field_41178.method_63535(class_2960.method_60655(parts[0], parts[1]));
+                    item = (Item) Registries.ITEM.get(Identifier.of(parts[0], parts[1]));
                     if (parts.length == 3) {
                         try { count = Integer.parseInt(parts[2]); } catch (Exception ignored) {}
                     }
                 } else {
                     item = parts.length == 1
-                        ? (ItemStack) class_7923.field_41178.method_63535(class_2960.method_60655("minecraft", parts[0]))
-                        : (ItemStack) class_7923.field_41178.method_63535(class_2960.method_60654(value));
+                        ? (Item) Registries.ITEM.get(Identifier.of("minecraft", parts[0]))
+                        : (Item) Registries.ITEM.get(Identifier.of(value));
                 }
                 if (item == null) return null;
-                return new ItemStack((class_1935) item, count);
+                return new ItemStack((ItemConvertible) item, count);
             }
-            if (targetType == class_1657.class) { // PlayerEntity
+            if (targetType == PlayerEntity.class) {
                 MinecraftClient mc = MeteorClient.mc;
-                if (value.equalsIgnoreCase("@p") || value.equalsIgnoreCase("self")) return mc.field_1724;
+                if (value.equalsIgnoreCase("@p") || value.equalsIgnoreCase("self")) return mc.player;
             }
             return value; // fallback: pass raw string
         } catch (Exception e) {
@@ -165,7 +165,7 @@ public class Execute extends Command {
 
     /** Provides autocomplete: class names before ".", then "ClassName.methodName" after ".". */
     private CompletableFuture<Suggestions> buildSuggestions( // was: jOdDDFXSeWl4(CommandContext,SuggestionsBuilder)
-            CommandContext<GuiGraphics> ctx, SuggestionsBuilder builder) {
+            CommandContext<ServerCommandSource> ctx, SuggestionsBuilder builder) {
         String remaining = builder.getRemaining();
         if (!remaining.contains(".")) {
             classRegistry.keySet().stream()

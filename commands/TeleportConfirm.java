@@ -5,17 +5,17 @@ import com.mojang.brigadier.arguments.ArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import meteordevelopment.meteorclient.commands.Command;
-import net.minecraft.class_1268;   // Hand
-import net.minecraft.GuiGraphics;   // CommandSource
-import net.minecraft.class_2596;   // Packet
-import net.minecraft.class_2793;   // TeleportConfirmC2SPacket
-import net.minecraft.class_2886;   // PlayerMoveC2SPacket
+import net.minecraft.util.Hand;
+import net.minecraft.server.command.ServerCommandSource;
+import net.minecraft.network.packet.Packet;
+import net.minecraft.network.packet.c2s.play.TeleportConfirmC2SPacket;
+import net.minecraft.network.packet.c2s.play.PlayerInteractItemC2SPacket;
 
 /**
  * .teleportconfirm <id>
  *
- * Manually sends a TeleportConfirm packet followed by a position packet.
- * Useful for debugging teleport desync issues.
+ * Manually sends a TeleportConfirm packet followed by a PlayerInteractItem packet
+ * with current yaw/pitch. Useful for debugging teleport desync issues.
  */
 public class TeleportConfirm extends Command {
     public TeleportConfirm() {
@@ -23,21 +23,21 @@ public class TeleportConfirm extends Command {
     }
 
     @Override
-    public void build(LiteralArgumentBuilder<GuiGraphics> builder) {
+    public void build(LiteralArgumentBuilder<ServerCommandSource> builder) {
         builder.then(Command.argument("id", (ArgumentType) IntegerArgumentType.integer())
             .executes(ctx -> {
                 Integer id = (Integer) ctx.getArgument("id", Integer.class);
                 this.info("teleporting with " + id, new Object[0]);
                 // Send TeleportConfirmC2SPacket
-                TeleportConfirm.mc.player.field_3944.method_52787( // networkHandler.sendPacket
-                    (class_2596) new class_2793(id.intValue()));
-                // Send PlayerMoveC2SPacket (LookOnly) with current yaw/pitch
-                TeleportConfirm.mc.player.field_3944.method_52787(
-                    (class_2596) new class_2886(
-                        class_1268.field_5808,                         // Hand.MAIN_HAND
+                TeleportConfirm.mc.player.networkHandler.sendPacket(
+                    (Packet) new TeleportConfirmC2SPacket(id.intValue()));
+                // Send PlayerInteractItemC2SPacket with current yaw/pitch
+                TeleportConfirm.mc.player.networkHandler.sendPacket(
+                    (Packet) new PlayerInteractItemC2SPacket(
+                        Hand.MAIN_HAND,
                         0,
-                        TeleportConfirm.mc.player.method_36454(),  // getYaw()
-                        TeleportConfirm.mc.player.method_36455())); // getPitch()
+                        TeleportConfirm.mc.player.getYaw(),
+                        TeleportConfirm.mc.player.getPitch()));
                 return 1;
             }));
     }
