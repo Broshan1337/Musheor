@@ -26,15 +26,15 @@ import musheor.utils.InventoryManager;
 import musheor.utils.PlayerUtils;
 import musheor.utils.WorldUtils;
 import musheor.utils.system.MusheorSystem;
-import net.minecraft.class_1542;   // ItemEntity
-import net.minecraft.ItemStack;   // Item
-import net.minecraft.Items;   // Items
-import net.minecraft.class_1937;   // World
-import net.minecraft.BlockPos;   // BlockPos
-import net.minecraft.class_238;    // Box
-import net.minecraft.class_2382;   // Vec3i
-import net.minecraft.class_2680;   // BlockState
-import net.minecraft.class_746;    // LivingEntity
+import net.minecraft.entity.ItemEntity;
+import net.minecraft.item.Item;
+import net.minecraft.item.Items;
+import net.minecraft.world.World;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Vec3i;
+import net.minecraft.block.BlockState;
+import net.minecraft.entity.LivingEntity;
 
 /**
  * Helper module: finds nearby item entities of the configured type and
@@ -47,7 +47,7 @@ public class GatherItem extends Module {
     private int tickCounter = 0; // was: oq3TU4VRVWuh
 
     /** The player entity snapshot used for position queries. */
-    private static class_746 playerRef; // was: CduCWLxmO
+    private static LivingEntity playerRef; // was: CduCWLxmO
 
     /** Scheduled executor that drives the async path-then-collect loop. */
     private static ScheduledExecutorService scheduler; // was: aYWh0ZNA4Rd
@@ -64,11 +64,11 @@ public class GatherItem extends Module {
 
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
 
-    private final Setting<ItemStack> item = this.sgGeneral.add(
+    private final Setting<Item> item = this.sgGeneral.add(
         new ItemSetting.Builder()
             .name("item")
             .description("Item to gather")
-            .defaultValue(Items.field_8281) // cobblestone
+            .defaultValue(Items.COBBLESTONE)
             .build());
 
     private final Setting<Boolean> ignoreBelowPavement = this.sgGeneral.add(
@@ -84,7 +84,7 @@ public class GatherItem extends Module {
 
     @Override
     public void onActivate() {
-        playerRef = this.mc.field_1724;
+        playerRef = this.mc.player;
         resetScheduler();
     }
 
@@ -109,15 +109,15 @@ public class GatherItem extends Module {
      * (accessible first) then by distance.
      */
     private List<BlockPos> findItemPositions() { // was: KDNrzlU9qtrEv
-        if (playerRef == null || this.mc.field_1687 == null) return new ArrayList<BlockPos>();
+        if (playerRef == null || this.mc.world == null) return new ArrayList<BlockPos>();
 
-        ItemStack targetItem = (ItemStack) this.item.get();
-        class_238 searchBox = new class_238( // AABB
+        Item targetItem = (Item) this.item.get();
+        Box searchBox = new Box( // AABB
             playerRef.getX() - 10, playerRef.getY() - 10, playerRef.getZ() - 10,
             playerRef.getX() + 10, 320.0, playerRef.getZ() + 10);
 
         ArrayList<ItemLocation> locations = new ArrayList<ItemLocation>();
-        this.mc.world.method_8390(class_1542.class, searchBox, entity -> entity.method_6983().getStack() == targetItem) // getStack().getItem()
+        this.mc.world.getEntitiesByClass(ItemEntity.class, searchBox, entity -> entity.getStack().getItem() == targetItem)
             .forEach(entity -> {
                 BlockPos pos = new BlockPos(
                     (int) Math.floor(entity.getX()),
@@ -128,14 +128,14 @@ public class GatherItem extends Module {
                     Math.pow(playerRef.getX() - entity.getX(), 2) +
                     Math.pow(playerRef.getY() - entity.getY(), 2) +
                     Math.pow(playerRef.getZ() - entity.getZ(), 2));
-                boolean accessible = ItemLocation.isAccessible((class_1937) this.mc.field_1687, pos); // was: jOdDDFXSeWl4(World,BlockPos)
+                boolean accessible = ItemLocation.isAccessible((World) this.mc.world, pos);
                 locations.add(new ItemLocation(pos, accessible, dist));
             });
 
         return locations.stream()
             .sorted(Comparator.comparing((ItemLocation l) -> !l.isAccessible)
                 .thenComparing(l -> l.distanceToPlayer))
-            .map(l -> l.pos)
+            .<BlockPos>map(l -> l.pos)
             .toList();
     }
 
@@ -179,8 +179,8 @@ public class GatherItem extends Module {
         }, 50L, TimeUnit.MILLISECONDS);
     }
 
-    private static boolean isAtPos(class_746 player, BlockPos pos) { // was: jOdDDFXSeWl4(LivingEntity,BlockPos)
-        return player != null && player.getBlockPos().method_19771((class_2382) pos, 1.0); // getBlockPos().isWithinDistance
+    private static boolean isAtPos(LivingEntity player, BlockPos pos) {
+        return player != null && player.getBlockPos().isWithinDistance((Vec3i) pos, 1.0);
     }
 
     /** Restarts the scheduler and resumes Baritone, then calls startCollection. */
@@ -194,7 +194,7 @@ public class GatherItem extends Module {
         List<BlockPos> items = this.findItemPositions();
         if (items.isEmpty() || this.inventoryFull()) {
             if (items.isEmpty()) {
-                ChatUtils.info("No more " + ((ItemStack) this.item.get()).method_63680().getString() + " found nearby.", new Object[0]);
+                ChatUtils.info("No more " + ((Item) this.item.get()).getName().getString() + " found nearby.", new Object[0]);
             } else {
                 ChatUtils.info("No more space in inventory.", new Object[0]);
             }
@@ -211,7 +211,7 @@ public class GatherItem extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre pre) {
-        if (WorldUtils.isScreenOpen()) return; // was: btLCQHvKVR
+        if (WorldUtils.checkForLag()) return; // was: btLCQHvKVR
         Module echestFarmer = Modules.get().get(EchestFarmer.class);
         if (echestFarmer != null && echestFarmer.isActive()) return;
 
@@ -222,9 +222,9 @@ public class GatherItem extends Module {
             this.toggle();
             return;
         }
-        if (this.mc.field_1724 != null) {
+        if (this.mc.player != null) {
             ++this.tickCounter;
-            if (this.tickCounter % 2 == 0 && WorldUtils.hasNearbyItems(this.findItemPositions())) { // was: UgB10d(List)
+            if (this.tickCounter % 2 == 0 && WorldUtils.allHaveSupport(this.findItemPositions())) { // was: UgB10d(List)
                 this.restart();
             }
         }
@@ -253,11 +253,11 @@ public class GatherItem extends Module {
          * Returns true if the block at {@code pos} in {@code world} is passable
          * (solid shape is empty, or the block is air).
          */
-        public static boolean isAccessible(class_1937 world, BlockPos pos) { // was: jOdDDFXSeWl4(World,BlockPos)
-            class_2680 state = world.getBlockState(pos);
+        public static boolean isAccessible(World world, BlockPos pos) {
+            BlockState state = world.getBlockState(pos);
             return state.isAir()      // isLiquid
-                || state.method_45474()       // isAir
-                || !state.method_26227().method_15769(); // getCollisionShape().isEmpty()
+                || state.isReplaceable()       // replaceable
+                || !state.getCollisionShape(null, null).isEmpty();
         }
 
         @Override public final String  toString() { return ObjectMethods.bootstrap("toString",  new MethodHandle[]{ItemLocation.class, "pos;isAccessible;distanceToPlayer", "pos", "isAccessible", "distanceToPlayer"}, this); }

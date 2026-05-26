@@ -14,43 +14,43 @@ import meteordevelopment.orbit.EventHandler;
 import musheor.musheor;
 import musheor.utils.InventoryManager;
 import musheor.utils.WorldUtils;
-import net.minecraft.InteractionHand;
-import net.minecraft.class_1733;
-import net.minecraft.ItemStack;
-import net.minecraft.ItemStack;
-import net.minecraft.Items;
-import net.minecraft.BlockPos;
-import net.minecraft.Direction;
-import net.minecraft.BlockPos;
-import net.minecraft.Vec3d;
-import net.minecraft.class_2480;
-import net.minecraft.Packet;
-import net.minecraft.class_2885;
-import net.minecraft.MinecraftClient;
-import net.minecraft.Screen;
+import net.minecraft.util.Hand;
+import net.minecraft.screen.ShulkerBoxScreenHandler;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.block.ShulkerBoxBlock;
+import net.minecraft.network.packet.Packet;
+import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.util.hit.HitResult;
+import net.minecraft.util.hit.BlockHitResult;
 
 public class Refill
 extends Module {
     private final SettingGroup sgGeneral;
-    private final MinecraftClient L7xSAoWJW800;
+    private final MinecraftClient mc; // was: L7xSAoWJW800
     public static Refill INSTANCE;
-    public final Setting<ItemStack> item;
+    public final Setting<Item> item;
     private final Setting<Boolean> fillCompletely;
     private final Setting<Integer> slotLimit;
     private final Setting<Boolean> placeUpsideDownBelow;
-    boolean EZKBvX;
-    boolean og2KVvNzA;
-    boolean IErgCCM;
+    boolean itemReady;   // was: EZKBvX
+    boolean placed;      // was: og2KVvNzA
+    boolean screenOpen;  // was: IErgCCM
     int slot;
-    int oQw0r3Nc;
-    int OyaWN2jsET;
-    BlockPos w6yjUYq;
-    Direction xZ3kyYFbKEKAvqOe;
+    int filledSlots;     // was: oQw0r3Nc
+    int openDelay;       // was: OyaWN2jsET
+    BlockPos placePos;   // was: w6yjUYq
+    Direction placeSide; // was: xZ3kyYFbKEKAvqOe
 
     public Refill() {
         super(musheor.AUTOMATION, "refill", "Places a shulkerbox and refills the inventory with items.");
         this.sgGeneral = this.settings.getDefaultGroup();
-        this.L7xSAoWJW800 = MinecraftClient.getInstance();
+        this.mc = MinecraftClient.getInstance();
         this.item = this.sgGeneral.add((Setting)((ItemSetting.Builder)((ItemSetting.Builder)((ItemSetting.Builder)new ItemSetting.Builder().name("item")).description("What block to steal / loot from shulker.")).defaultValue((Object)Items.OBSIDIAN)).build());
         this.fillCompletely = this.sgGeneral.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("fill-all")).description("When this setting is enabled, the inventory will be completely filled up until there are no empty slots")).defaultValue((Object)true)).build());
         this.slotLimit = this.sgGeneral.add((Setting)((IntSetting.Builder)((IntSetting.Builder)((IntSetting.Builder)((IntSetting.Builder)new IntSetting.Builder().name("max-slots")).description("How many slots can maximumly be filled up")).defaultValue((Object)10)).visible(() -> (Boolean)this.fillCompletely.get() == false)).build());
@@ -59,99 +59,101 @@ extends Module {
     }
 
     public void onActivate() {
-        this.EZKBvX = false;
-        this.w6yjUYq = null;
-        this.xZ3kyYFbKEKAvqOe = Direction.field_11033;
-        this.og2KVvNzA = false;
-        this.IErgCCM = false;
+        this.itemReady = false;
+        this.placePos  = null;
+        this.placeSide = Direction.DOWN;
+        this.placed    = false;
+        this.screenOpen = false;
         this.slot = 0;
-        this.oQw0r3Nc = 0;
-        this.OyaWN2jsET = 5;
+        this.filledSlots = 0;
+        this.openDelay = 5;
     }
 
     @EventHandler
     private void onTick(TickEvent.Post post) {
-        if (this.L7xSAoWJW800.player == null || this.L7xSAoWJW800.world == null) {
+        if (this.mc.player == null || this.mc.world == null) {
             return;
         }
         if (this.isActive()) {
             int n;
-            ItemStack ItemStack2;
-            if (!this.EZKBvX) {
-                ItemStack2 = InventoryManager.BX92A0OIIvD9((ItemStack)this.item.get());
-                if (ItemStack2 != null) {
-                    n = this.L7xSAoWJW800.player.getId().method_7395(ItemStack2);
-                    if (this.L7xSAoWJW800.player.getId().field_7545 == n) {
-                        this.EZKBvX = true;
+            if (!this.itemReady) {
+                ItemStack foundStack = InventoryManager.findLeastFullShulkerWithItem((Item) this.item.get());
+                if (foundStack != null) {
+                    n = this.mc.player.getInventory().getSlotWithStack(foundStack);
+                    if (this.mc.player.getInventory().selectedSlot == n) {
+                        this.itemReady = true;
                         return;
                     }
                     for (int i = 0; i < 9; ++i) {
-                        if (this.L7xSAoWJW800.player.getId().method_5438(i) != ItemStack2) continue;
-                        InventoryManager.KP44bk(i);
-                        this.EZKBvX = true;
+                        if (this.mc.player.getInventory().getStack(i) != foundStack) continue;
+                        InventoryManager.switchHotbarSlot(i);
+                        this.itemReady = true;
                         return;
                     }
                 }
-                n = InventoryManager.H4b9BDTz5I9d4B1z();
-                if (InventoryManager.jOdDDFXSeWl4((ItemStack)this.item.get(), n)) {
-                    InventoryManager.KP44bk(n);
-                    this.EZKBvX = true;
+                n = InventoryManager.findEmptyHotbarSlot();
+                if (InventoryManager.moveShulkerToSlot((Item) this.item.get(), n)) {
+                    InventoryManager.switchHotbarSlot(n);
+                    this.itemReady = true;
                     return;
                 }
             }
-            if (this.w6yjUYq == null) {
-                if (((Boolean)this.placeUpsideDownBelow.get()).booleanValue()) {
-                    this.w6yjUYq = this.L7xSAoWJW800.player.getBlockPos().method_33096(this.L7xSAoWJW800.player.getBlockPos().getY() - 2);
+            if (this.placePos == null) {
+                if (((Boolean) this.placeUpsideDownBelow.get()).booleanValue()) {
+                    this.placePos = this.mc.player.getBlockPos().withY(this.mc.player.getBlockPos().getY() - 2);
                 } else {
-                    ItemStack2 = this.L7xSAoWJW800.field_1765;
-                    if (ItemStack2 instanceof Screen) {
-                        Screen Screen2 = (Screen)ItemStack2;
-                        BlockPos BlockPos2 = Screen2.method_17777();
-                        this.xZ3kyYFbKEKAvqOe = Screen2.method_17780();
-                        this.w6yjUYq = BlockPos2.offset(this.xZ3kyYFbKEKAvqOe);
+                    HitResult target = this.mc.crosshairTarget;
+                    if (target instanceof BlockHitResult) {
+                        BlockHitResult blockHitResult = (BlockHitResult) target;
+                        BlockPos hitPos = blockHitResult.getBlockPos();
+                        this.placeSide = blockHitResult.getSide();
+                        this.placePos  = hitPos.offset(this.placeSide);
                     }
                 }
                 return;
             }
-            if (!this.og2KVvNzA) {
-                if (BlockUtils.canPlace((BlockPos)this.w6yjUYq, (boolean)true)) {
-                    this.og2KVvNzA = WorldUtils.jOdDDFXSeWl4(this.w6yjUYq, this.xZ3kyYFbKEKAvqOe);
+            if (!this.placed) {
+                if (BlockUtils.canPlace((BlockPos) this.placePos, (boolean) true)) {
+                    this.placed = WorldUtils.placeBlockPacket(this.placePos, this.placeSide);
                 } else {
                     this.toggle();
                     this.info("Cannot place shulkerbox at desired position", new Object[0]);
                 }
                 return;
             }
-            if (this.L7xSAoWJW800.world.getBlockState(this.w6yjUYq).getBlock() instanceof class_2480) {
-                if (!this.IErgCCM) {
-                    if (!(this.L7xSAoWJW800.player.field_7512 instanceof class_1733)) {
-                        this.L7xSAoWJW800.player.field_3944.method_52787((Packet)new class_2885(InteractionHand.field_5808, new Screen(Vec3d.method_24953((BlockPos)this.w6yjUYq), Direction.field_11036, this.w6yjUYq, false), 0));
+            if (this.mc.world.getBlockState(this.placePos).getBlock() instanceof ShulkerBoxBlock) {
+                if (!this.screenOpen) {
+                    if (!(this.mc.player.currentScreenHandler instanceof ShulkerBoxScreenHandler)) {
+                        this.mc.player.networkHandler.sendPacket((Packet) new PlayerInteractBlockC2SPacket(
+                            Hand.MAIN_HAND,
+                            new BlockHitResult(Vec3d.ofCenter(this.placePos), Direction.UP, this.placePos, false),
+                            0));
                     } else {
-                        this.IErgCCM = true;
+                        this.screenOpen = true;
                     }
                 } else {
-                    ItemStack2 = this.L7xSAoWJW800.player.field_7512;
-                    if (this.OyaWN2jsET > 0) {
-                        --this.OyaWN2jsET;
+                    ShulkerBoxScreenHandler handler = (ShulkerBoxScreenHandler) this.mc.player.currentScreenHandler;
+                    if (this.openDelay > 0) {
+                        --this.openDelay;
                         return;
                     }
-                    if (((Boolean)this.fillCompletely.get()).booleanValue()) {
-                        for (n = 0; n < 27 && InventoryManager.ZeOLrA() > 0; ++n) {
-                            if (ItemStack2.method_7611(this.slot).method_7677().getStack() == this.item.get()) {
+                    if (((Boolean) this.fillCompletely.get()).booleanValue()) {
+                        for (n = 0; n < 27 && InventoryManager.countEmptySlots() > 0; ++n) {
+                            if (handler.getSlot(this.slot).getStack().getItem() == this.item.get()) {
                                 InvUtils.shiftClick().slotId(this.slot);
                             }
                             ++this.slot;
                         }
-                        this.L7xSAoWJW800.player.method_7346();
+                        this.mc.player.closeHandledScreen();
                         this.toggle();
-                    } else if (this.oQw0r3Nc < (Integer)this.slotLimit.get() || this.slot < 27) {
-                        if (ItemStack2.method_7611(this.slot).method_7677().getStack() == this.item.get()) {
+                    } else if (this.filledSlots < (Integer) this.slotLimit.get() || this.slot < 27) {
+                        if (handler.getSlot(this.slot).getStack().getItem() == this.item.get()) {
                             InvUtils.shiftClick().slotId(this.slot);
-                            ++this.oQw0r3Nc;
+                            ++this.filledSlots;
                         }
                         ++this.slot;
                     } else {
-                        this.L7xSAoWJW800.player.method_7346();
+                        this.mc.player.closeHandledScreen();
                         this.toggle();
                     }
                 }
@@ -159,4 +161,3 @@ extends Module {
         }
     }
 }
-

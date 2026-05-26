@@ -21,13 +21,12 @@ import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import musheor.musheor;
 import musheor.utils.WorldUtils;
-import net.minecraft.BlockPos;
-import net.minecraft.Direction;
-import net.minecraft.BlockPos;
-import net.minecraft.Vec3d;
-import net.minecraft.BlockState;
-import net.minecraft.BlockView;
-import net.minecraft.Fluids;
+import net.minecraft.block.BlockState;
+import net.minecraft.fluid.FluidState;
+import net.minecraft.fluid.Fluids;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
 
 public class SpongeBob
 extends Module {
@@ -41,9 +40,9 @@ extends Module {
     private final Setting<SettingColor> previewSideColor;
     private final Setting<SettingColor> previewLineColor;
     private final Setting<Integer> previewRefresh;
-    private final List<BlockPos> oP3Nqfl3FWY;
-    private int LG9c9vjIy;
-    private int DjHFvVBXZHN0k;
+    private final List<BlockPos> spongeTargets;
+    private int previewTick;
+    private int placeTick;
 
     public SpongeBob() {
         super(musheor.AUTOMATION, "spongebob", "Clears water using optimized sponge logic.");
@@ -57,15 +56,15 @@ extends Module {
         this.previewSideColor = this.sgPreview.add((Setting)((ColorSetting.Builder)((ColorSetting.Builder)new ColorSetting.Builder().name("side-color")).defaultValue(new SettingColor(255, 255, 0, 50)).visible(() -> this.previewShape.get() == ShapeMode.Sides || this.previewShape.get() == ShapeMode.Both)).build());
         this.previewLineColor = this.sgPreview.add((Setting)((ColorSetting.Builder)((ColorSetting.Builder)new ColorSetting.Builder().name("line-color")).defaultValue(new SettingColor(255, 255, 0, 255)).visible(() -> this.previewShape.get() == ShapeMode.Lines || this.previewShape.get() == ShapeMode.Both)).build());
         this.previewRefresh = this.sgPreview.add((Setting)((IntSetting.Builder)((IntSetting.Builder)new IntSetting.Builder().name("refresh-delay")).defaultValue((Object)10)).min(1).sliderRange(1, 60).build());
-        this.oP3Nqfl3FWY = new ArrayList<BlockPos>();
-        this.LG9c9vjIy = 0;
-        this.DjHFvVBXZHN0k = 0;
+        this.spongeTargets = new ArrayList<BlockPos>();
+        this.previewTick = 0;
+        this.placeTick = 0;
     }
 
     public void onActivate() {
-        this.oP3Nqfl3FWY.clear();
-        this.LG9c9vjIy = 0;
-        this.DjHFvVBXZHN0k = 0;
+        this.spongeTargets.clear();
+        this.previewTick = 0;
+        this.placeTick = 0;
     }
 
     @EventHandler
@@ -74,110 +73,108 @@ extends Module {
             return;
         }
         if (((Boolean)this.previewEnabled.get()).booleanValue()) {
-            this.h9MViB();
+            this.tickPreview();
             return;
         }
-        this.kAT8CfWuaGb();
+        this.tickPlacement();
     }
 
-    private void h9MViB() {
-        if (++this.LG9c9vjIy < (Integer)this.previewRefresh.get()) {
+    private void tickPreview() {
+        if (++this.previewTick < (Integer)this.previewRefresh.get()) {
             return;
         }
-        this.LG9c9vjIy = 0;
-        this.oP3Nqfl3FWY.clear();
-        HashSet<BlockPos> hashSet = new HashSet<BlockPos>(this.uUngom5N());
-        if (hashSet.isEmpty()) {
+        this.previewTick = 0;
+        this.spongeTargets.clear();
+        HashSet<BlockPos> waterSet = new HashSet<BlockPos>(this.findWaterBlocks());
+        if (waterSet.isEmpty()) {
             return;
         }
-        List<List<BlockPos>> list = this.mp3zoXQFKUKYj5(new ArrayList<BlockPos>(hashSet));
-        if (list.isEmpty()) {
+        List<List<BlockPos>> clusters = this.clusterWaterBlocks(new ArrayList<BlockPos>(waterSet));
+        if (clusters.isEmpty()) {
             return;
         }
-        for (List<BlockPos> list2 : list) {
-            BlockPos BlockPos2 = this.Gt56Sj4a6BWhgB(list2);
-            BlockPos BlockPos3 = this.UgB10d(BlockPos2);
-            if (BlockPos3 == null) continue;
-            this.oP3Nqfl3FWY.add(BlockPos3);
-            this.jOdDDFXSeWl4(hashSet, BlockPos3);
+        for (List<BlockPos> cluster : clusters) {
+            BlockPos centroid = this.getCentroid(cluster);
+            BlockPos target = this.findReachablePosition(centroid);
+            if (target == null) continue;
+            this.spongeTargets.add(target);
+            this.removeCoveredBlocks(waterSet, target);
         }
     }
 
     @EventHandler
     private void onRender3D(Render3DEvent render3DEvent) {
-        if (!((Boolean)this.previewEnabled.get()).booleanValue() || this.oP3Nqfl3FWY.isEmpty()) {
+        if (!((Boolean)this.previewEnabled.get()).booleanValue() || this.spongeTargets.isEmpty()) {
             return;
         }
-        for (BlockPos BlockPos2 : this.oP3Nqfl3FWY) {
+        for (BlockPos BlockPos2 : this.spongeTargets) {
             render3DEvent.renderer.box(BlockPos2, (Color)this.previewSideColor.get(), (Color)this.previewLineColor.get(), (ShapeMode)this.previewShape.get(), 0);
         }
     }
 
-    private BlockPos jOdDDFXSeWl4(List<BlockPos> list) {
-        BlockPos BlockPos22;
+    private BlockPos getBestTarget(List<BlockPos> list) {
+        BlockPos closest;
         if (list.isEmpty()) {
             return null;
         }
-        int n = 0;
-        int n2 = 0;
-        int n3 = 0;
-        for (BlockPos BlockPos22 : list) {
-            n += BlockPos22.getX();
-            n2 += BlockPos22.getY();
-            n3 += BlockPos22.getZ();
+        int x = 0, y = 0, z = 0;
+        for (BlockPos pos : list) {
+            x += pos.getX();
+            y += pos.getY();
+            z += pos.getZ();
         }
-        BlockPos BlockPos3 = new BlockPos(n / list.size(), n2 / list.size(), n3 / list.size());
-        if (this.mc.world.getFluidState(BlockPos3).getFluid() == Fluids.field_15910 && this.mc.world.getFluidState(BlockPos3).method_15771()) {
-            return BlockPos3;
+        BlockPos center = new BlockPos(x / list.size(), y / list.size(), z / list.size());
+        FluidState centerFluid = this.mc.world.getFluidState(center);
+        if (centerFluid.getFluid() == Fluids.WATER && centerFluid.isStill()) {
+            return center;
         }
-        BlockPos22 = null;
+        closest = null;
         double d = Double.MAX_VALUE;
-        Vec3d Vec3d2 = Vec3d.method_24953((BlockPos)BlockPos3);
-        for (BlockPos BlockPos4 : list) {
-            double d2 = Vec3d2.method_1025(Vec3d.method_24953((BlockPos)BlockPos4));
+        Vec3d centerVec = Vec3d.ofCenter(center);
+        for (BlockPos pos : list) {
+            double d2 = centerVec.squaredDistanceTo(Vec3d.ofCenter(pos));
             if (!(d2 < d)) continue;
             d = d2;
-            BlockPos22 = BlockPos4;
+            closest = pos;
         }
-        return BlockPos22;
+        return closest;
     }
 
-    private void kAT8CfWuaGb() {
-        List<BlockPos> list = this.uUngom5N();
-        if (list.isEmpty()) {
+    private void tickPlacement() {
+        List<BlockPos> waterBlocks = this.findWaterBlocks();
+        if (waterBlocks.isEmpty()) {
             return;
         }
-        List<List<BlockPos>> list2 = this.mp3zoXQFKUKYj5(list);
-        for (List<BlockPos> list3 : list2) {
-            Vec3d Vec3d2;
-            BlockPos BlockPos2 = this.jOdDDFXSeWl4(list3);
-            if (BlockPos2 == null || (Vec3d2 = this.mc.player.method_33571()).method_1022(Vec3d.method_24953((BlockPos)BlockPos2)) > (double)((Integer)this.placeReach.get()).intValue()) continue;
-            if (++this.DjHFvVBXZHN0k < (Integer)this.placeDelay.get()) {
+        List<List<BlockPos>> clusters = this.clusterWaterBlocks(waterBlocks);
+        for (List<BlockPos> cluster : clusters) {
+            BlockPos target = this.getBestTarget(cluster);
+            if (target == null || this.mc.player.getPos().distanceTo(Vec3d.ofCenter(target)) > (double)((Integer)this.placeReach.get()).intValue()) continue;
+            if (++this.placeTick < (Integer)this.placeDelay.get()) {
                 return;
             }
-            this.DjHFvVBXZHN0k = 0;
-            WorldUtils.jOdDDFXSeWl4(BlockPos2, Direction.field_11033);
+            this.placeTick = 0;
+            WorldUtils.placeBlockPacket(target, Direction.DOWN);
         }
     }
 
-    private List<BlockPos> uUngom5N() {
-        ArrayList<BlockPos> arrayList = new ArrayList<BlockPos>();
-        BlockPos BlockPos2 = this.mc.player.getBlockPos();
+    private List<BlockPos> findWaterBlocks() {
+        ArrayList<BlockPos> result = new ArrayList<BlockPos>();
+        BlockPos origin = this.mc.player.getBlockPos();
         int n = (Integer)this.scanDistance.get();
         for (int i = -n; i <= n; ++i) {
             for (int j = -n; j <= n; ++j) {
                 for (int k = -n; k <= n; ++k) {
-                    BlockPos BlockPos3 = BlockPos2.method_10069(i, j, k);
-                    BlockView BlockView2 = this.mc.world.getFluidState(BlockPos3);
-                    if (!BlockView2.method_15771() || BlockView2.getFluid() != Fluids.field_15910) continue;
-                    arrayList.add(BlockPos3);
+                    BlockPos pos = origin.add(i, j, k);
+                    FluidState fluid = this.mc.world.getFluidState(pos);
+                    if (!fluid.isStill() || fluid.getFluid() != Fluids.WATER) continue;
+                    result.add(pos);
                 }
             }
         }
-        return arrayList;
+        return result;
     }
 
-    private List<List<BlockPos>> mp3zoXQFKUKYj5(List<BlockPos> list) {
+    private List<List<BlockPos>> clusterWaterBlocks(List<BlockPos> list) {
         ArrayList<List<BlockPos>> arrayList = new ArrayList<List<BlockPos>>();
         HashSet<BlockPos> hashSet = new HashSet<BlockPos>(list);
         HashSet<BlockPos> hashSet2 = new HashSet<BlockPos>();
@@ -193,7 +190,7 @@ extends Module {
                 arrayList2.add(BlockPos3);
                 for (Direction Direction2 : Direction.values()) {
                     BlockPos BlockPos4 = BlockPos3.offset(Direction2);
-                    if (!hashSet.contains(BlockPos4) || hashSet2.contains(BlockPos4) || this.jOdDDFXSeWl4(BlockPos2, BlockPos4) > n) continue;
+                    if (!hashSet.contains(BlockPos4) || hashSet2.contains(BlockPos4) || this.manhattanDistance(BlockPos2, BlockPos4) > n) continue;
                     hashSet2.add(BlockPos4);
                     arrayDeque.add(BlockPos4);
                 }
@@ -203,52 +200,49 @@ extends Module {
         return arrayList;
     }
 
-    private int jOdDDFXSeWl4(BlockPos BlockPos2, BlockPos BlockPos3) {
-        return Math.abs(BlockPos2.getX() - BlockPos3.getX()) + Math.abs(BlockPos2.getY() - BlockPos3.getY()) + Math.abs(BlockPos2.getZ() - BlockPos3.getZ());
+    private int manhattanDistance(BlockPos a, BlockPos b) {
+        return Math.abs(a.getX() - b.getX()) + Math.abs(a.getY() - b.getY()) + Math.abs(a.getZ() - b.getZ());
     }
 
-    private BlockPos Gt56Sj4a6BWhgB(List<BlockPos> list) {
-        long l = 0L;
-        long l2 = 0L;
-        long l3 = 0L;
+    private BlockPos getCentroid(List<BlockPos> list) {
+        long x = 0L, y = 0L, z = 0L;
         int n = list.size();
-        for (BlockPos BlockPos2 : list) {
-            l += (long)BlockPos2.getX();
-            l2 += (long)BlockPos2.getY();
-            l3 += (long)BlockPos2.getZ();
+        for (BlockPos pos : list) {
+            x += (long)pos.getX();
+            y += (long)pos.getY();
+            z += (long)pos.getZ();
         }
-        return new BlockPos((int)(l / (long)n), (int)(l2 / (long)n), (int)(l3 / (long)n));
+        return new BlockPos((int)(x / (long)n), (int)(y / (long)n), (int)(z / (long)n));
     }
 
-    private BlockPos UgB10d(BlockPos BlockPos2) {
+    private BlockPos findReachablePosition(BlockPos center) {
         int n;
-        Vec3d Vec3d2 = this.mc.player.method_33571();
-        if (this.jOdDDFXSeWl4(BlockPos2, Vec3d2, n = ((Integer)this.placeReach.get()).intValue())) {
-            return BlockPos2;
+        Vec3d playerPos = this.mc.player.getPos();
+        if (this.isReachable(center, playerPos, n = ((Integer)this.placeReach.get()).intValue())) {
+            return center;
         }
         for (int i = -4; i <= 4; ++i) {
             for (int j = -4; j <= 4; ++j) {
                 for (int k = -4; k <= 4; ++k) {
-                    BlockPos BlockPos3 = BlockPos2.method_10069(i, j, k);
-                    if (!this.jOdDDFXSeWl4(BlockPos3, Vec3d2, n)) continue;
-                    return BlockPos3;
+                    BlockPos candidate = center.add(i, j, k);
+                    if (!this.isReachable(candidate, playerPos, n)) continue;
+                    return candidate;
                 }
             }
         }
         return null;
     }
 
-    private boolean jOdDDFXSeWl4(BlockPos BlockPos2, Vec3d Vec3d2, double d) {
-        if (Vec3d2.method_1022(Vec3d.method_24953((BlockPos)BlockPos2)) > d) {
+    private boolean isReachable(BlockPos pos, Vec3d playerPos, double maxDist) {
+        if (playerPos.distanceTo(Vec3d.ofCenter(pos)) > maxDist) {
             return false;
         }
-        BlockState BlockState2 = this.mc.world.getBlockState(BlockPos2);
-        return BlockState2.method_26227().method_15771() || BlockState2.method_45474();
+        BlockState state = this.mc.world.getBlockState(pos);
+        return state.getCollisionShape(null, null).isEmpty() || state.isAir();
     }
 
-    private void jOdDDFXSeWl4(Set<BlockPos> set, BlockPos BlockPos2) {
-        int n = 7;
-        set.removeIf(BlockPos3 -> this.jOdDDFXSeWl4((BlockPos)BlockPos3, BlockPos2) <= 7);
+    private void removeCoveredBlocks(Set<BlockPos> set, BlockPos spongePos) {
+        set.removeIf(pos -> this.manhattanDistance((BlockPos)pos, spongePos) <= 7);
     }
 }
 

@@ -57,13 +57,13 @@ public class IceRailBuilder extends Module {
 
     @Override
     public void onActivate() {
-        if (this.mc.field_1724 == null || this.mc.field_1687 == null) return;
+        if (this.mc.player == null || this.mc.world == null) return;
         initPositions((Axis) ((Object) this.axis.get()));
     }
 
     @EventHandler
     public void onTick(TickEvent.Pre pre) {
-        if (this.mc.field_1724 == null || this.mc.field_1687 == null) return;
+        if (this.mc.player == null || this.mc.world == null) return;
         if (this.currentPos == null) return;
 
         this.iceTodo.clear();
@@ -71,30 +71,30 @@ public class IceRailBuilder extends Module {
 
         // Find ice positions that are not yet packed_ice
         for (BlockPos pos : getIcePositions(true)) {
-            if (this.mc.world.getBlockState(pos).getBlock() == Blocks.field_10384) continue; // packed_ice
-            this.iceTodo.add(pos.method_10062()); // toImmutable()
+            if (this.mc.world.getBlockState(pos).getBlock() == Blocks.BLUE_ICE) continue; // packed_ice
+            this.iceTodo.add(pos.toImmutable()); // toImmutable()
         }
         // Find wall positions that should be solid
         for (BlockPos pos : getWallPositions(true)) {
-            if (!this.mc.world.getBlockState(pos).method_45474()) continue; // isAir()
-            this.wallTodo.add(pos.method_10062());
+            if (!this.mc.world.getBlockState(pos).isAir()) continue; // isAir()
+            this.wallTodo.add(pos.toImmutable());
         }
 
         // Place walls first (they act as support for the ice)
         if (!this.wallTodo.isEmpty()) {
-            WorldUtils.placeBlocksOfType(this.wallTodo, Blocks.field_10515); // was: jOdDDFXSeWl4(List,Block) — obsidian
+            WorldUtils.placeBlockList(this.wallTodo, Blocks.NETHERRACK); // was: jOdDDFXSeWl4(List,Block) — obsidian
             return;
         }
         if (!this.iceTodo.isEmpty()) {
-            WorldUtils.placeBlocksOfType(this.iceTodo, Blocks.field_10384); // packed_ice
+            WorldUtils.placeBlockList(this.iceTodo, Blocks.BLUE_ICE); // packed_ice
         }
     }
 
     @EventHandler
     private void onRender3D(Render3DEvent event) {
-        if (this.mc.field_1724 == null || this.mc.field_1687 == null) return;
-        RenderUtils.renderBlockList(event, this.wallTodo, Blocks.field_10515); // was: jOdDDFXSeWl4(Render3DEvent,List,Block)
-        RenderUtils.renderBlockList(event, this.iceTodo,  Blocks.field_10384);
+        if (this.mc.player == null || this.mc.world == null) return;
+        RenderUtils.renderBlockList(event, this.wallTodo, Blocks.NETHERRACK); // was: jOdDDFXSeWl4(Render3DEvent,List,Block)
+        RenderUtils.renderBlockList(event, this.iceTodo,  Blocks.BLUE_ICE);
     }
 
     /** Sets start/current positions based on the chosen axis. */

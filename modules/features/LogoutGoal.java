@@ -15,8 +15,8 @@ import meteordevelopment.meteorclient.utils.world.Dimension;
 import meteordevelopment.orbit.EventHandler;
 import musheor.musheor;
 import musheor.utils.PlayerUtils;
-import net.minecraft.ScreenHandler;
-import net.minecraft.class_2661;
+import net.minecraft.network.packet.s2c.common.DisconnectS2CPacket;
+import net.minecraft.text.Text;
 
 public class LogoutGoal
 extends Module {
@@ -62,7 +62,7 @@ extends Module {
                 object = (String)object + " X: " + n + " Z: " + n2;
             }
             PlayerUtils.J2pm2c07elEb5G((String)object);
-            this.mc.player.field_3944.method_52781(new class_2661((ScreenHandler)ScreenHandler.method_43470((String)object)));
+            this.mc.player.networkHandler.onDisconnect(new DisconnectS2CPacket(Text.literal((String)object)));
         }
     }
 

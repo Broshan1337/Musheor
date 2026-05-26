@@ -12,185 +12,185 @@ import net.minecraft.BlockPos;
 import net.minecraft.MinecraftClient;
 
 public class HighwayNavigator {
-    private final MinecraftClient pC75hPFWhX6l9fO = MinecraftClient.getInstance();
-    private final HighwayRouter.Route ZR5lph5QmbF4;
-    private final BounceController rsx7hBWYw;
-    private final Listener BJiJWZC;
-    private final Config zFc9E6nf;
-    private State Tlldfou = State.urju0X;
-    private int SMYZpUvCuykws2 = 0;
-    private int Rvjkko3BhJ = 0;
+    private final MinecraftClient mc = MinecraftClient.getInstance();
+    private final HighwayRouter.Route route;
+    private final BounceController bounceController;
+    private final Listener listener;
+    private final Config config;
+    private State state = State.Aligning;
+    private int legIndex = 0;
+    private int alignTicks = 0;
     private int stuckTicks = 0;
-    private int FERZ92ROAgUmnlta = 0;
-    private WorldUtils.Vec2d LR7hJDRhkI = null;
-    private double PvLNVHs2LlOde76 = Double.MAX_VALUE;
+    private int settleTicksRemaining = 0;
+    private WorldUtils.Vec2d lastPos2d = null;
+    private double approachDistance = Double.MAX_VALUE;
 
     public HighwayNavigator(HighwayRouter.Route route, Config config, BounceController bounceController, Listener listener) {
-        this.ZR5lph5QmbF4 = route;
-        this.zFc9E6nf = config;
-        this.rsx7hBWYw = bounceController;
-        this.BJiJWZC = listener;
+        this.route = route;
+        this.config = config;
+        this.bounceController = bounceController;
+        this.listener = listener;
     }
 
-    public State QhaZQGwqdeFQp() {
-        return this.Tlldfou;
+    public State getState() {
+        return this.state;
     }
 
     public void tick() {
-        if (this.pC75hPFWhX6l9fO.player == null || this.pC75hPFWhX6l9fO.world == null) {
+        if (this.mc.player == null || this.mc.world == null) {
             return;
         }
-        if (this.Tlldfou == State.Pmh3HuqB53i0Y || this.Tlldfou == State.eNsdDMk8mJXTb) {
+        if (this.state == State.Done || this.state == State.Stopped) {
             return;
         }
-        if (this.ZR5lph5QmbF4.LkopaVK1It4L.isEmpty()) {
-            this.m9RUHINs8();
+        if (this.route.legs.isEmpty()) {
+            this.completeRoute();
             return;
         }
-        switch (this.Tlldfou.ordinal()) {
+        switch (this.state.ordinal()) {
             case 0: {
-                this.wyf4MqVc0fll();
+                this.tickAligning();
                 break;
             }
             case 1: {
-                this.zOg3JjefgZ();
+                this.tickBouncing();
                 break;
             }
             case 2: {
-                this.JZDYaLhvUPKPZH();
+                this.tickApproaching();
                 break;
             }
             case 3: {
-                this.rBGedpmjQyZ();
+                this.tickTransitioning();
                 break;
             }
             case 4: {
-                this.mR2Jt8P();
+                this.tickSettling();
             }
         }
     }
 
-    public void xRVyNRV3cB7() {
-        this.OyaWN2jsET();
-        if (PathingHelper.LcPVM4w5KCoKSxGs()) {
-            PathingHelper.xRVyNRV3cB7();
+    public void stop() {
+        this.disableBouncing();
+        if (PathingHelper.isAlreadyPathing()) {
+            PathingHelper.stopPathing();
         }
     }
 
-    private void wyf4MqVc0fll() {
-        WorldUtils.Vec2d vec2d = this.NwHqgBmOLP();
-        float f = this.Gt56Sj4a6BWhgB(vec2d);
-        this.pC75hPFWhX6l9fO.player.method_36456(f);
-        float f2 = Math.abs(this.jOdDDFXSeWl4(this.pC75hPFWhX6l9fO.player.method_36454(), f));
-        ++this.Rvjkko3BhJ;
-        if (f2 <= this.zFc9E6nf.JxUbzYJNdp9UvTN() || this.Rvjkko3BhJ >= this.zFc9E6nf.xs9d08DSpSt()) {
-            this.Rvjkko3BhJ = 0;
-            this.PvLNVHs2LlOde76 = this.jOdDDFXSeWl4(this.NwHqgBmOLP());
-            this.bhy0Ddon9H6();
-            this.mp3zoXQFKUKYj5(State.GLaGIbduHdrl, "bouncing toward " + this.aP5dDWz());
+    private void tickAligning() {
+        WorldUtils.Vec2d vec2d = this.getNextWaypoint();
+        float f = this.getYawToward(vec2d);
+        this.mc.player.setYaw(f);
+        float f2 = Math.abs(this.normalizeAngleDiff(this.mc.player.getYaw(), f));
+        ++this.alignTicks;
+        if (f2 <= this.config.yawToleranceDeg() || this.alignTicks >= this.config.alignTimeoutTicks()) {
+            this.alignTicks = 0;
+            this.approachDistance = this.distanceToWaypoint(this.getNextWaypoint());
+            this.enableBouncing();
+            this.setState(State.Bouncing, "bouncing toward " + this.getNextWaypointStr());
         }
     }
 
-    private void zOg3JjefgZ() {
-        WorldUtils.Vec2d vec2d = this.NwHqgBmOLP();
-        double d = this.jOdDDFXSeWl4(vec2d);
-        if (!PathingHelper.LcPVM4w5KCoKSxGs()) {
-            this.pC75hPFWhX6l9fO.player.method_36456(this.Gt56Sj4a6BWhgB(vec2d));
+    private void tickBouncing() {
+        WorldUtils.Vec2d vec2d = this.getNextWaypoint();
+        double d = this.distanceToWaypoint(vec2d);
+        if (!PathingHelper.isAlreadyPathing()) {
+            this.mc.player.setYaw(this.getYawToward(vec2d));
         }
-        this.Pg9t6rCsTkuc();
-        if (d < this.zFc9E6nf.pyVwRgYkI() && d < this.PvLNVHs2LlOde76) {
-            this.mp3zoXQFKUKYj5(State.o1Qz0II6HvwyAED, "approaching " + this.aP5dDWz());
-        }
-    }
-
-    private void JZDYaLhvUPKPZH() {
-        WorldUtils.Vec2d vec2d = this.NwHqgBmOLP();
-        double d = this.jOdDDFXSeWl4(vec2d);
-        this.pC75hPFWhX6l9fO.player.method_36456(this.Gt56Sj4a6BWhgB(vec2d));
-        if (d < this.zFc9E6nf.X6N4Qf2Uc()) {
-            this.OyaWN2jsET();
-            BlockPos BlockPos2 = this.mp3zoXQFKUKYj5(vec2d);
-            PathingHelper.l92qSNnpKrYO(BlockPos2);
-            this.mp3zoXQFKUKYj5(State.gANxWblT, "transitioning at " + this.aP5dDWz());
+        this.updateStuckDetection();
+        if (d < this.config.approachRadius() && d < this.approachDistance) {
+            this.setState(State.Approaching, "approaching " + this.getNextWaypointStr());
         }
     }
 
-    private void rBGedpmjQyZ() {
-        if (!PathingHelper.LcPVM4w5KCoKSxGs()) {
-            this.FERZ92ROAgUmnlta = this.zFc9E6nf.dzkD9N();
-            this.mp3zoXQFKUKYj5(State.PlefynG, "settling at " + this.aP5dDWz());
+    private void tickApproaching() {
+        WorldUtils.Vec2d vec2d = this.getNextWaypoint();
+        double d = this.distanceToWaypoint(vec2d);
+        this.mc.player.setYaw(this.getYawToward(vec2d));
+        if (d < this.config.arriveRadius()) {
+            this.disableBouncing();
+            BlockPos BlockPos2 = this.toBlockPos(vec2d);
+            PathingHelper.setGoal(BlockPos2);
+            this.setState(State.Transitioning, "transitioning at " + this.getNextWaypointStr());
         }
     }
 
-    private void mR2Jt8P() {
-        int n = this.SMYZpUvCuykws2 + 2;
-        WorldUtils.Vec2d vec2d = n < this.ZR5lph5QmbF4.UsO18QwQES9yS8g.size() ? this.ZR5lph5QmbF4.UsO18QwQES9yS8g.get(n) : this.NwHqgBmOLP();
-        this.pC75hPFWhX6l9fO.player.method_36456(this.Gt56Sj4a6BWhgB(vec2d));
-        if (--this.FERZ92ROAgUmnlta <= 0) {
-            this.ISyBYC52zF();
+    private void tickTransitioning() {
+        if (!PathingHelper.isAlreadyPathing()) {
+            this.settleTicksRemaining = this.config.settleTicks();
+            this.setState(State.Settling, "settling at " + this.getNextWaypointStr());
         }
     }
 
-    private void ISyBYC52zF() {
-        ++this.SMYZpUvCuykws2;
-        if (this.SMYZpUvCuykws2 >= this.ZR5lph5QmbF4.LkopaVK1It4L.size()) {
-            this.m9RUHINs8();
+    private void tickSettling() {
+        int n = this.legIndex + 2;
+        WorldUtils.Vec2d vec2d = n < this.route.waypoints.size() ? this.route.waypoints.get(n) : this.getNextWaypoint();
+        this.mc.player.setYaw(this.getYawToward(vec2d));
+        if (--this.settleTicksRemaining <= 0) {
+            this.advanceLeg();
+        }
+    }
+
+    private void advanceLeg() {
+        ++this.legIndex;
+        if (this.legIndex >= this.route.legs.size()) {
+            this.completeRoute();
             return;
         }
-        this.bhy0Ddon9H6();
-        this.mp3zoXQFKUKYj5(State.urju0X, "aligning for leg " + this.SMYZpUvCuykws2 + ": " + this.YCvJj8imMAxxu().Z8PfWilTZRV().name());
+        this.enableBouncing();
+        this.setState(State.Aligning, "aligning for leg " + this.legIndex + ": " + this.getCurrentLeg().highway().name());
     }
 
-    private void bhy0Ddon9H6() {
-        this.rsx7hBWYw.Gt56Sj4a6BWhgB(true);
+    private void enableBouncing() {
+        this.bounceController.setBouncing(true);
     }
 
-    private void OyaWN2jsET() {
-        this.rsx7hBWYw.Gt56Sj4a6BWhgB(false);
+    private void disableBouncing() {
+        this.bounceController.setBouncing(false);
     }
 
-    private void Pg9t6rCsTkuc() {
-        WorldUtils.Vec2d vec2d = this.Tr234Br();
-        if (this.LR7hJDRhkI != null) {
-            double d = HighwayNetwork.jOdDDFXSeWl4(vec2d, this.LR7hJDRhkI);
+    private void updateStuckDetection() {
+        WorldUtils.Vec2d vec2d = this.getPlayerPos2d();
+        if (this.lastPos2d != null) {
+            double d = HighwayNetwork.distance(vec2d, this.lastPos2d);
             this.stuckTicks = d < 0.5 ? ++this.stuckTicks : 0;
         }
-        this.LR7hJDRhkI = vec2d;
+        this.lastPos2d = vec2d;
     }
 
-    private HighwayRouter.Leg YCvJj8imMAxxu() {
-        return this.ZR5lph5QmbF4.LkopaVK1It4L.get(this.SMYZpUvCuykws2);
+    private HighwayRouter.Leg getCurrentLeg() {
+        return this.route.legs.get(this.legIndex);
     }
 
-    private WorldUtils.Vec2d NwHqgBmOLP() {
-        return this.ZR5lph5QmbF4.UsO18QwQES9yS8g.get(this.SMYZpUvCuykws2 + 1);
+    private WorldUtils.Vec2d getNextWaypoint() {
+        return this.route.waypoints.get(this.legIndex + 1);
     }
 
-    private String aP5dDWz() {
-        WorldUtils.Vec2d vec2d = this.NwHqgBmOLP();
-        return String.format("(%.0f, %.0f)", vec2d.mcAmeo(), vec2d.ckqstPn4Gd());
+    private String getNextWaypointStr() {
+        WorldUtils.Vec2d vec2d = this.getNextWaypoint();
+        return String.format("(%.0f, %.0f)", vec2d.x(), vec2d.z());
     }
 
-    private double jOdDDFXSeWl4(WorldUtils.Vec2d vec2d) {
-        WorldUtils.Vec2d vec2d2 = this.Tr234Br();
-        return HighwayNetwork.jOdDDFXSeWl4(vec2d2, vec2d);
+    private double distanceToWaypoint(WorldUtils.Vec2d vec2d) {
+        WorldUtils.Vec2d vec2d2 = this.getPlayerPos2d();
+        return HighwayNetwork.distance(vec2d2, vec2d);
     }
 
-    private WorldUtils.Vec2d Tr234Br() {
-        return new WorldUtils.Vec2d(this.pC75hPFWhX6l9fO.player.getX(), this.pC75hPFWhX6l9fO.player.getZ());
+    private WorldUtils.Vec2d getPlayerPos2d() {
+        return new WorldUtils.Vec2d(this.mc.player.getX(), this.mc.player.getZ());
     }
 
-    private BlockPos mp3zoXQFKUKYj5(WorldUtils.Vec2d vec2d) {
-        return new BlockPos((int)vec2d.mcAmeo(), (int)VersionHelper.get().getPlayerPos().method_10214(), (int)vec2d.ckqstPn4Gd());
+    private BlockPos toBlockPos(WorldUtils.Vec2d vec2d) {
+        return new BlockPos((int)vec2d.x(), (int)VersionHelper.get().getPlayerPos().getY(), (int)vec2d.z());
     }
 
-    private float Gt56Sj4a6BWhgB(WorldUtils.Vec2d vec2d) {
-        double d = vec2d.mcAmeo() - this.pC75hPFWhX6l9fO.player.getX();
-        double d2 = vec2d.ckqstPn4Gd() - this.pC75hPFWhX6l9fO.player.getZ();
+    private float getYawToward(WorldUtils.Vec2d vec2d) {
+        double d = vec2d.x() - this.mc.player.getX();
+        double d2 = vec2d.z() - this.mc.player.getZ();
         return (float)Math.toDegrees(Math.atan2(-d, d2));
     }
 
-    private float jOdDDFXSeWl4(float f, float f2) {
+    private float normalizeAngleDiff(float f, float f2) {
         float f3 = (f - f2) % 360.0f;
         if (f3 > 180.0f) {
             f3 -= 360.0f;
@@ -201,107 +201,107 @@ public class HighwayNavigator {
         return f3;
     }
 
-    private void mp3zoXQFKUKYj5(State state, String string) {
-        this.Tlldfou = state;
-        this.BJiJWZC.jOdDDFXSeWl4(state, string);
+    private void setState(State state, String string) {
+        this.state = state;
+        this.listener.onStateChange(state, string);
     }
 
-    private void m9RUHINs8() {
-        this.OyaWN2jsET();
-        this.Tlldfou = State.Pmh3HuqB53i0Y;
-        this.BJiJWZC.o6zpkIIG9();
+    private void completeRoute() {
+        this.disableBouncing();
+        this.state = State.Done;
+        this.listener.onWaypointReached();
     }
 
     public static final class State
     extends Enum<State> {
-        public static final /* enum */ State urju0X = new State();
-        public static final /* enum */ State GLaGIbduHdrl = new State();
-        public static final /* enum */ State o1Qz0II6HvwyAED = new State();
-        public static final /* enum */ State gANxWblT = new State();
-        public static final /* enum */ State PlefynG = new State();
-        public static final /* enum */ State Pmh3HuqB53i0Y = new State();
-        public static final /* enum */ State eNsdDMk8mJXTb = new State();
-        private static final /* synthetic */ State[] Z6nxChaWC9ymwoio;
+        public static final /* enum */ State Aligning = new State();
+        public static final /* enum */ State Bouncing = new State();
+        public static final /* enum */ State Approaching = new State();
+        public static final /* enum */ State Transitioning = new State();
+        public static final /* enum */ State Settling = new State();
+        public static final /* enum */ State Done = new State();
+        public static final /* enum */ State Stopped = new State();
+        private static final /* synthetic */ State[] $VALUES;
 
         public static State[] values() {
-            return (State[])Z6nxChaWC9ymwoio.clone();
+            return (State[])$VALUES.clone();
         }
 
         public static State valueOf(String string) {
             return Enum.valueOf(State.class, string);
         }
 
-        private static /* synthetic */ State[] gJZa6Zx1Rzm() {
-            return new State[]{urju0X, GLaGIbduHdrl, o1Qz0II6HvwyAED, gANxWblT, PlefynG, Pmh3HuqB53i0Y, eNsdDMk8mJXTb};
+        private static /* synthetic */ State[] $init() {
+            return new State[]{Aligning, Bouncing, Approaching, Transitioning, Settling, Done, Stopped};
         }
 
         static {
-            Z6nxChaWC9ymwoio = State.gJZa6Zx1Rzm();
+            $VALUES = State.$init();
         }
     }
 
     public static final class Config
     extends Record {
-        private final double IHeihwsO8p;
-        private final double PoixtDMvQM;
-        private final int txFOGrboKBXQp;
-        private final float HP7CUOuiyLUHkEkD;
-        private final int EyGoWQcn;
-        private final int wkzyCzfggXudWEsa;
+        private final double approachRadius;
+        private final double arriveRadius;
+        private final int alignTimeoutTicks;
+        private final float yawToleranceDeg;
+        private final int transitionGoalDist;
+        private final int settleTicks;
 
         public Config(double d, double d2, int n, float f, int n2, int n3) {
-            this.IHeihwsO8p = d;
-            this.PoixtDMvQM = d2;
-            this.txFOGrboKBXQp = n;
-            this.HP7CUOuiyLUHkEkD = f;
-            this.EyGoWQcn = n2;
-            this.wkzyCzfggXudWEsa = n3;
+            this.approachRadius = d;
+            this.arriveRadius = d2;
+            this.alignTimeoutTicks = n;
+            this.yawToleranceDeg = f;
+            this.transitionGoalDist = n2;
+            this.settleTicks = n3;
         }
 
         @Override
         public final String toString() {
-            return ObjectMethods.bootstrap("toString", new MethodHandle[]{Config.class, "approachRadius;arriveRadius;alignTimeoutTicks;yawToleranceDeg;transitionGoalDist;settleTicks", "IHeihwsO8p", "PoixtDMvQM", "txFOGrboKBXQp", "HP7CUOuiyLUHkEkD", "EyGoWQcn", "wkzyCzfggXudWEsa"}, this);
+            return ObjectMethods.bootstrap("toString", new MethodHandle[]{Config.class, "approachRadius;arriveRadius;alignTimeoutTicks;yawToleranceDeg;transitionGoalDist;settleTicks", "approachRadius", "arriveRadius", "alignTimeoutTicks", "yawToleranceDeg", "transitionGoalDist", "settleTicks"}, this);
         }
 
         @Override
         public final int hashCode() {
-            return (int)ObjectMethods.bootstrap("hashCode", new MethodHandle[]{Config.class, "approachRadius;arriveRadius;alignTimeoutTicks;yawToleranceDeg;transitionGoalDist;settleTicks", "IHeihwsO8p", "PoixtDMvQM", "txFOGrboKBXQp", "HP7CUOuiyLUHkEkD", "EyGoWQcn", "wkzyCzfggXudWEsa"}, this);
+            return (int)ObjectMethods.bootstrap("hashCode", new MethodHandle[]{Config.class, "approachRadius;arriveRadius;alignTimeoutTicks;yawToleranceDeg;transitionGoalDist;settleTicks", "approachRadius", "arriveRadius", "alignTimeoutTicks", "yawToleranceDeg", "transitionGoalDist", "settleTicks"}, this);
         }
 
         @Override
         public final boolean equals(Object object) {
-            return (boolean)ObjectMethods.bootstrap("equals", new MethodHandle[]{Config.class, "approachRadius;arriveRadius;alignTimeoutTicks;yawToleranceDeg;transitionGoalDist;settleTicks", "IHeihwsO8p", "PoixtDMvQM", "txFOGrboKBXQp", "HP7CUOuiyLUHkEkD", "EyGoWQcn", "wkzyCzfggXudWEsa"}, this, object);
+            return (boolean)ObjectMethods.bootstrap("equals", new MethodHandle[]{Config.class, "approachRadius;arriveRadius;alignTimeoutTicks;yawToleranceDeg;transitionGoalDist;settleTicks", "approachRadius", "arriveRadius", "alignTimeoutTicks", "yawToleranceDeg", "transitionGoalDist", "settleTicks"}, this, object);
         }
 
-        public double pyVwRgYkI() {
-            return this.IHeihwsO8p;
+        public double approachRadius() {
+            return this.approachRadius;
         }
 
-        public double X6N4Qf2Uc() {
-            return this.PoixtDMvQM;
+        public double arriveRadius() {
+            return this.arriveRadius;
         }
 
-        public int xs9d08DSpSt() {
-            return this.txFOGrboKBXQp;
+        public int alignTimeoutTicks() {
+            return this.alignTimeoutTicks;
         }
 
-        public float JxUbzYJNdp9UvTN() {
-            return this.HP7CUOuiyLUHkEkD;
+        public float yawToleranceDeg() {
+            return this.yawToleranceDeg;
         }
 
-        public int dzkD9N() {
-            return this.wkzyCzfggXudWEsa;
+        public int settleTicks() {
+            return this.settleTicks;
         }
     }
 
     public static interface BounceController {
-        public void Gt56Sj4a6BWhgB(boolean var1);
+        public void setBouncing(boolean var1);
     }
 
     public static interface Listener {
-        public void jOdDDFXSeWl4(State var1, String var2);
+        public void onStateChange(State var1, String var2);
 
-        public void o6zpkIIG9();
+        public void onWaypointReached();
     }
 }
 

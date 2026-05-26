@@ -13,14 +13,15 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.orbit.EventHandler;
 import musheor.musheor;
-import net.minecraft.Text;
-import net.minecraft.class_1706;
-import net.minecraft.ItemStack;
-import net.minecraft.class_471;
+import net.minecraft.client.gui.screen.ingame.AnvilScreen;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
+import net.minecraft.screen.AnvilScreenHandler;
+import net.minecraft.screen.ScreenHandler;
 
 public class ItemBranding
 extends Module {
-    private final Setting<List<ItemStack>> list;
+    private final Setting<List<Item>> list;
     private final Setting<String> name;
     private final Setting<Integer> packetLimit;
     private final Setting<Boolean> closeOnDone;
@@ -41,18 +42,17 @@ extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Post post) {
-        Text AbstractClientPlayerEntity;
-        if (this.mc.player == null || this.mc.world == null || this.mc.field_1755 == null) {
+        ScreenHandler screenHandler;
+        if (this.mc.player == null || this.mc.world == null || this.mc.currentScreen == null) {
             return;
         }
-        if (!(this.mc.field_1755 instanceof class_471) || !((AbstractClientPlayerEntity = this.mc.player.field_7512) instanceof class_1706)) {
+        if (!(this.mc.currentScreen instanceof AnvilScreen) || !((screenHandler = this.mc.player.currentScreenHandler) instanceof AnvilScreenHandler)) {
             return;
         }
-        class_1706 class_17062 = (class_1706)AbstractClientPlayerEntity;
-        AbstractClientPlayerEntity = class_17062.method_7611(0).method_7677();
-        if (AbstractClientPlayerEntity.setStack()) {
+        AnvilScreenHandler anvilHandler = (AnvilScreenHandler)screenHandler;
+        ItemStack stack = anvilHandler.getSlot(0).getStack();
+        if (stack.isEmpty()) {
             ArrayDeque arrayDeque = new ArrayDeque();
         }
     }
 }
-

@@ -18,7 +18,7 @@ import musheor.modules.automation.HighwayBuilder;
 import musheor.musheor;
 import musheor.utils.StatsHandler;
 import musheor.utils.internal.HighwayState;
-import net.minecraft.MinecraftClient;
+import net.minecraft.client.MinecraftClient;
 
 public class StatsViewer
 extends HudElement {
@@ -48,14 +48,14 @@ extends HudElement {
         this.valueColor = this.sgGeneral.add((Setting)((ColorSetting.Builder)((ColorSetting.Builder)new ColorSetting.Builder().name("value-color")).description("Text color of the hud info lines.")).defaultValue(new SettingColor(255, 0, 208, 255)).build());
     }
 
-    private String[][] pC75hPFWhX6l9fO() {
+    private String[][] buildStatsRows() {
         ArrayList arrayList = new ArrayList();
-        HighwayState highwayState = HighwayState.LmpuWjra();
-        String[][] stringArrayArray = new String[][]{{"Latest session: ", ""}, {"  Runtime: ", StatsHandler.mp3zoXQFKUKYj5(highwayState.yIXEDGFGtS9H())}, {"  Direction: ", String.valueOf((Object)HighwayBuilder.kLIvClyeu()).toLowerCase()}, {"  Distance travelled: ", String.valueOf(StatsHandler.UsO18QwQES9yS8g())}};
-        String[][] stringArrayArray2 = new String[][]{{"Blocks", ""}, {"  Obsidian Placed: ", String.valueOf(highwayState.y4KXVv64NUgBOpTQ())}, {"  Obsidian Mined: ", String.valueOf(highwayState.rYODaO())}, {"  Enderchests mined: ", String.valueOf(highwayState.ydrC4rD1c1Q8())}, {"  Netherrack mined: ", String.valueOf(highwayState.ga2XNtjAtdTW())}, {"  Total mined: ", String.valueOf(highwayState.rYODaO() + highwayState.ga2XNtjAtdTW() + highwayState.ydrC4rD1c1Q8())}};
-        String[][] stringArrayArray3 = new String[][]{{"Performance", ""}, {"  Placements / s: ", StatsHandler.usJLOV0subXO3(StatsHandler.gfAIDmJ7f())}, {"  Placements / h: ", StatsHandler.ZbTtF5KYyGL9YXed(StatsHandler.gfAIDmJ7f())}, {"  Breaks / s: ", StatsHandler.e5oi2ZF(StatsHandler.kfGx5x4Y())}, {"  Distance / s: ", StatsHandler.L5CF0C6jx0T17H4I(StatsHandler.UsO18QwQES9yS8g())}, {"  Distance / h: ", StatsHandler.Y9BgxR(StatsHandler.UsO18QwQES9yS8g())}};
-        String[][] stringArrayArray4 = new String[][]{{"Info", ""}, {"  Distance to next section: ", String.valueOf(StatsHandler.BX92A0OIIvD9((Integer)this.sectionSize.get()))}, {"  Percentage completed: ", StatsHandler.ZbTtF5KYyGL9YXed((Integer)this.sectionSize.get())}, {"  Material Count: ", String.valueOf(StatsHandler.lp0pdRphdk())}, {"  ETA to next section: ", StatsHandler.xG2PP8jo4RWLS((Integer)this.sectionSize.get())}, {"  ETA to next refill: ", StatsHandler.MWtXKjmtUPMW8cZK()}};
-        String[][] stringArrayArray5 = new String[][]{{"Lifetime: ", ""}, {"  Obsidian Placed: ", String.valueOf(highwayState.IQLoNzzVjej0Fh())}, {"  Obsidian Mined: ", String.valueOf(highwayState.xf86w8EXQDMegty())}, {"  Enderchests mined: ", String.valueOf(highwayState.YqwfVX())}, {"  Netherrack mined: ", String.valueOf(highwayState.TQkkPszTZ())}, {"  Other mined: ", String.valueOf(highwayState.JUMkrk2AfG())}};
+        HighwayState highwayState = HighwayState.getInstance();
+        String[][] stringArrayArray = new String[][]{{"Latest session: ", ""}, {"  Runtime: ", StatsHandler.formatTicksAsTime(highwayState.getTicksActive())}, {"  Direction: ", String.valueOf((Object)HighwayBuilder.getDirection()).toLowerCase()}, {"  Distance travelled: ", String.valueOf(StatsHandler.getDistanceToCheckpoint())}};
+        String[][] stringArrayArray2 = new String[][]{{"Blocks", ""}, {"  Obsidian Placed: ", String.valueOf(highwayState.getSessionObsidianPlacedCount())}, {"  Obsidian Mined: ", String.valueOf(highwayState.getSessionObsidianMinedCount())}, {"  Enderchests mined: ", String.valueOf(highwayState.getSessionMiscMinedCount())}, {"  Netherrack mined: ", String.valueOf(highwayState.getSessionLavaBucketCount())}, {"  Total mined: ", String.valueOf(highwayState.getSessionObsidianMinedCount() + highwayState.getSessionLavaBucketCount() + highwayState.getSessionMiscMinedCount())}};
+        String[][] stringArrayArray3 = new String[][]{{"Performance", ""}, {"  Placements / s: ", StatsHandler.formatBlocksPerSecond(StatsHandler.getBlocksPlacedPerSecond())}, {"  Placements / h: ", StatsHandler.formatBlocksPerHour(StatsHandler.getBlocksPlacedPerSecond())}, {"  Breaks / s: ", StatsHandler.formatBlocksPerSecond(StatsHandler.getBlocksMinedPerSecond())}, {"  Distance / s: ", StatsHandler.formatDistancePerSecond(StatsHandler.getDistanceToCheckpoint())}, {"  Distance / h: ", StatsHandler.formatDistancePerHour(StatsHandler.getDistanceToCheckpoint())}};
+        String[][] stringArrayArray4 = new String[][]{{"Info", ""}, {"  Distance to next section: ", String.valueOf(StatsHandler.getDistanceToNextMultiple((Integer)this.sectionSize.get()))}, {"  Percentage completed: ", StatsHandler.getPercentOffset((Integer)this.sectionSize.get())}, {"  Material Count: ", String.valueOf(StatsHandler.countObsidianBlocks())}, {"  ETA to next section: ", StatsHandler.formatCheckpointETA((Integer)this.sectionSize.get())}, {"  ETA to next refill: ", StatsHandler.formatObsidianETA()}};
+        String[][] stringArrayArray5 = new String[][]{{"Lifetime: ", ""}, {"  Obsidian Placed: ", String.valueOf(highwayState.getLifetimeObsidianPlaced())}, {"  Obsidian Mined: ", String.valueOf(highwayState.getLifetimeObsidianMined())}, {"  Enderchests mined: ", String.valueOf(highwayState.getLifetimeLavaBuckets())}, {"  Netherrack mined: ", String.valueOf(highwayState.getLifetimeMiscBlocks())}, {"  Other mined: ", String.valueOf(highwayState.getLifetimeMiscMined())}};
         if (((Boolean)this.displaySession.get()).booleanValue()) {
             arrayList.addAll(Arrays.asList(stringArrayArray));
         }
@@ -78,7 +78,7 @@ extends HudElement {
         if (MinecraftClient.getInstance().player == null || MinecraftClient.getInstance().world == null) {
             return;
         }
-        String[][] stringArray = this.pC75hPFWhX6l9fO();
+        String[][] stringArray = this.buildStatsRows();
         double d = hudRenderer.textHeight(true, ((Double)this.scale.get()).doubleValue());
         double d2 = 0.0;
         for (String[] stringArray2 : stringArray) {

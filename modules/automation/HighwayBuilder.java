@@ -44,14 +44,15 @@ import net.minecraft.Items;
 import net.minecraft.Blocks;
 import net.minecraft.Block;
 import net.minecraft.BlockPos;
-import net.minecraft.class_2480;
+import net.minecraft.SuspiciousStewItem;
 import net.minecraft.BlockState;
 import net.minecraft.MinecraftClient;
-import net.minecraft.MutableText;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.item.SuspiciousStewItem;
 
 public class HighwayBuilder
 extends Module {
-    private final MinecraftClient dmmGdE2RN9C = MinecraftClient.getInstance();
+    private final MinecraftClient mc = MinecraftClient.getInstance();
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
     private final SettingGroup sgPlacement = this.settings.createGroup("Placement");
     private final SettingGroup sgRestocking = this.settings.createGroup("Restocking");
@@ -61,21 +62,21 @@ extends Module {
     private final SettingGroup sgSafety = this.settings.createGroup("Safety");
     private final SettingGroup sgInventory = this.settings.createGroup("Inventory");
     private final SettingGroup sgMisc = this.settings.createGroup("Miscellaneous");
-    private final Setting<BuildMode> buildMode = this.sgGeneral.add((Setting)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)new EnumSetting.Builder().name("build-mode")).description("Pave mode places blocks - Dig mode digs tunnels.")).defaultValue((Object)BuildMode.e4uKoS)).build());
-    public final Setting<Mode> mode = this.sgGeneral.add((Setting)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)new EnumSetting.Builder().name("mode")).description("Handle walking and aligning automatically or ignore in manual mode")).defaultValue((Object)Mode.jll9Iyc1Ftxi)).build());
-    private final Setting<HighwayType> highwayType = this.sgGeneral.add((Setting)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)new EnumSetting.Builder().name("highway-type")).description("Cardinal or diagonal highway type.")).defaultValue((Object)HighwayType.b76P5ieurZIX)).build());
+    private final Setting<BuildMode> buildMode = this.sgGeneral.add((Setting)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)new EnumSetting.Builder().name("build-mode")).description("Pave mode places blocks - Dig mode digs tunnels.")).defaultValue((Object)BuildMode.Pave)).build());
+    public final Setting<Mode> mode = this.sgGeneral.add((Setting)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)new EnumSetting.Builder().name("mode")).description("Handle walking and aligning automatically or ignore in manual mode")).defaultValue((Object)Mode.Auto)).build());
+    private final Setting<HighwayType> highwayType = this.sgGeneral.add((Setting)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)new EnumSetting.Builder().name("highway-type")).description("Cardinal or diagonal highway type.")).defaultValue((Object)HighwayType.Cardinal)).build());
     private final Setting<Integer> pavementWidth = this.sgGeneral.add((Setting)((IntSetting.Builder)((IntSetting.Builder)((IntSetting.Builder)new IntSetting.Builder().name("pavement-width")).description("Width of the pavement below the player's feet.")).defaultValue((Object)4)).sliderRange(3, 9).build());
-    private final Setting<Block> pavementBlock = this.sgPlacement.add((Setting)((BlockSetting.Builder)((BlockSetting.Builder)((BlockSetting.Builder)((BlockSetting.Builder)new BlockSetting.Builder().name("pavement-block")).description("Block that is used to build highway pavement with.")).defaultValue((Object)Blocks.field_10540)).visible(() -> this.buildMode.get() == BuildMode.e4uKoS)).build());
-    private final Setting<ScaffoldMode> scaffoldMode = this.sgPlacement.add((Setting)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)new EnumSetting.Builder().name("scaffold-mode")).description("What type of scaffolding to use when going over caves and open area's.")).defaultValue((Object)ScaffoldMode.nQgi06)).visible(() -> this.buildMode.get() == BuildMode.flZYoiXwrl)).build());
-    private final Setting<Block> scaffoldBlock = this.sgPlacement.add((Setting)((BlockSetting.Builder)((BlockSetting.Builder)((BlockSetting.Builder)((BlockSetting.Builder)new BlockSetting.Builder().name("scaffold-block")).description("Block that is used to fix the flooring with.")).defaultValue((Object)Blocks.field_10515)).visible(() -> this.buildMode.get() == BuildMode.flZYoiXwrl && this.scaffoldMode.get() != ScaffoldMode.oGrnfoe87ZeN)).build());
-    private final Setting<Boolean> scaffoldLeftRail = this.sgPlacement.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("scaffold-left-rail")).description("Places the railing on the left side of the player.")).defaultValue((Object)true)).visible(() -> this.buildMode.get() == BuildMode.flZYoiXwrl)).build());
-    private final Setting<Boolean> scaffoldRightRail = this.sgPlacement.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("scaffold-right-rail")).description("Places the railing on the right side of the player.")).defaultValue((Object)true)).visible(() -> this.buildMode.get() == BuildMode.flZYoiXwrl)).build());
-    private final Setting<Boolean> placeRails = this.sgPlacement.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("place-rails")).description("Places railings on both sides of the highway 1 block above the pavement.")).defaultValue((Object)true)).visible(() -> this.buildMode.get() == BuildMode.e4uKoS)).build());
-    private final Setting<Boolean> placeLeftRails = this.sgPlacement.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("place-left-rail")).description("Places railings on the left side sides of the highway 1 block above the pavement.")).defaultValue((Object)true)).visible(() -> this.buildMode.get() == BuildMode.e4uKoS && (Boolean)this.placeRails.get() != false)).build());
-    private final Setting<Boolean> placeRightRails = this.sgPlacement.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("place-right-rail")).description("Places railings on the right sides of the highway 1 block above the pavement.")).defaultValue((Object)true)).visible(() -> this.buildMode.get() == BuildMode.e4uKoS && (Boolean)this.placeRails.get() != false)).build());
-    private final Setting<Boolean> replaceCryingObsidian = this.sgPlacement.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("replace-crying-obsidian")).description("Mines and replaces crying obsidian if part of the pavement positions.")).defaultValue((Object)false)).visible(() -> this.buildMode.get() == BuildMode.e4uKoS)).build());
-    private final Setting<Boolean> fillCeiling = this.sgPlacement.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("fill-ceiling")).description("Fills the ceiling at Y level 123 with blocks.")).defaultValue((Object)false)).visible(() -> this.buildMode.get() == BuildMode.e4uKoS)).build());
-    private final Setting<Boolean> allowEchestFarming = this.sgRestocking.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("echest-farming")).description("Allow the player to farm obsidian by mining enderchests.")).defaultValue((Object)true)).visible(() -> this.buildMode.get() == BuildMode.e4uKoS && this.pavementBlock.get() == Blocks.field_10540)).build());
+    private final Setting<Block> pavementBlock = this.sgPlacement.add((Setting)((BlockSetting.Builder)((BlockSetting.Builder)((BlockSetting.Builder)((BlockSetting.Builder)new BlockSetting.Builder().name("pavement-block")).description("Block that is used to build highway pavement with.")).defaultValue((Object)Blocks.OBSIDIAN)).visible(() -> this.buildMode.get() == BuildMode.Pave)).build());
+    private final Setting<ScaffoldMode> scaffoldMode = this.sgPlacement.add((Setting)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)new EnumSetting.Builder().name("scaffold-mode")).description("What type of scaffolding to use when going over caves and open area's.")).defaultValue((Object)ScaffoldMode.GrimScaffold)).visible(() -> this.buildMode.get() == BuildMode.Dig)).build());
+    private final Setting<Block> scaffoldBlock = this.sgPlacement.add((Setting)((BlockSetting.Builder)((BlockSetting.Builder)((BlockSetting.Builder)((BlockSetting.Builder)new BlockSetting.Builder().name("scaffold-block")).description("Block that is used to fix the flooring with.")).defaultValue((Object)Blocks.NETHERRACK)).visible(() -> this.buildMode.get() == BuildMode.Dig && this.scaffoldMode.get() != ScaffoldMode.None)).build());
+    private final Setting<Boolean> scaffoldLeftRail = this.sgPlacement.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("scaffold-left-rail")).description("Places the railing on the left side of the player.")).defaultValue((Object)true)).visible(() -> this.buildMode.get() == BuildMode.Dig)).build());
+    private final Setting<Boolean> scaffoldRightRail = this.sgPlacement.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("scaffold-right-rail")).description("Places the railing on the right side of the player.")).defaultValue((Object)true)).visible(() -> this.buildMode.get() == BuildMode.Dig)).build());
+    private final Setting<Boolean> placeRails = this.sgPlacement.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("place-rails")).description("Places railings on both sides of the highway 1 block above the pavement.")).defaultValue((Object)true)).visible(() -> this.buildMode.get() == BuildMode.Pave)).build());
+    private final Setting<Boolean> placeLeftRails = this.sgPlacement.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("place-left-rail")).description("Places railings on the left side sides of the highway 1 block above the pavement.")).defaultValue((Object)true)).visible(() -> this.buildMode.get() == BuildMode.Pave && (Boolean)this.placeRails.get() != false)).build());
+    private final Setting<Boolean> placeRightRails = this.sgPlacement.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("place-right-rail")).description("Places railings on the right sides of the highway 1 block above the pavement.")).defaultValue((Object)true)).visible(() -> this.buildMode.get() == BuildMode.Pave && (Boolean)this.placeRails.get() != false)).build());
+    private final Setting<Boolean> replaceCryingObsidian = this.sgPlacement.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("replace-crying-obsidian")).description("Mines and replaces crying obsidian if part of the pavement positions.")).defaultValue((Object)false)).visible(() -> this.buildMode.get() == BuildMode.Pave)).build());
+    private final Setting<Boolean> fillCeiling = this.sgPlacement.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("fill-ceiling")).description("Fills the ceiling at Y level 123 with blocks.")).defaultValue((Object)false)).visible(() -> this.buildMode.get() == BuildMode.Pave)).build());
+    private final Setting<Boolean> allowEchestFarming = this.sgRestocking.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("echest-farming")).description("Allow the player to farm obsidian by mining enderchests.")).defaultValue((Object)true)).visible(() -> this.buildMode.get() == BuildMode.Pave && this.pavementBlock.get() == Blocks.OBSIDIAN)).build());
     private final Setting<Boolean> allowItemRestocking = this.sgRestocking.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("item-restocking")).description("Allow the restocking process to grab items from shulkers.")).defaultValue((Object)false)).build());
     private final Setting<Boolean> storeBrokenPickaxes = this.sgRestocking.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("store-broken-pickaxes")).description("Swaps broken pickaxes with new ones when restocking these, allowing you to repair them later.")).defaultValue((Object)true)).visible(() -> this.allowItemRestocking.get())).build());
     private final Setting<Boolean> allowShulkerRestocking = this.sgRestocking.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("shulker-restocking")).description("Allow the restocking process to grab shulkers from the player's enderchest.")).defaultValue((Object)false)).build());
@@ -108,28 +109,28 @@ extends Module {
     }
 
     public void onActivate() {
-        if (this.dmmGdE2RN9C.player == null || this.dmmGdE2RN9C.world == null) {
+        if (this.mc.player == null || this.mc.world == null) {
             return;
         }
-        HighwayState highwayState = HighwayState.LmpuWjra();
-        if (this.dmmGdE2RN9C.player.method_7325()) {
+        HighwayState highwayState = HighwayState.getInstance();
+        if (this.mc.player.isSpectator()) {
             MusheorSystem.debug("Player is probably in queue, waiting...", new Object[0]);
-            highwayState.CEOjBr5G5R(0);
+            highwayState.setTicksActive(0);
         } else {
             boolean bl;
-            highwayState.merMGMToO0ZYtkEn();
-            boolean bl2 = this.pavementBlock.get() == Blocks.field_10540 && InventoryManager.usJLOV0subXO3(Items.ENDER_CHEST) < 1;
-            boolean bl3 = this.pavementBlock.get() == Blocks.field_10540 && InventoryManager.usJLOV0subXO3(HighwayBuilder.yaVvWAqooeFn().asItem()) < 8;
+            highwayState.reset();
+            boolean bl2 = this.pavementBlock.get() == Blocks.OBSIDIAN && InventoryManager.usJLOV0subXO3(Items.ENDER_CHEST) < 1;
+            boolean bl3 = this.pavementBlock.get() == Blocks.OBSIDIAN && InventoryManager.usJLOV0subXO3(HighwayBuilder.getPavementBlock().asItem()) < 8;
             boolean bl4 = InventoryManager.VYEwzRq(false) < 1;
             boolean bl5 = bl = InventoryManager.VYEwzRq(true) < 1;
-            if (this.buildMode.get() == BuildMode.e4uKoS && (bl2 || bl3 || bl4 || !HighwayBuilder.l92qSNnpKrYO())) {
+            if (this.buildMode.get() == BuildMode.Pave && (bl2 || bl3 || bl4 || !HighwayBuilder.hasFood())) {
                 if (bl2) {
                     this.error("No enderchests found in inventory...", new Object[0]);
                 }
                 if (bl3) {
                     this.error("No pavement material found in inventory...", new Object[0]);
                 }
-                if (!HighwayBuilder.l92qSNnpKrYO()) {
+                if (!HighwayBuilder.hasFood()) {
                     this.error("No food found in inventory...", new Object[0]);
                 }
                 if (bl4) {
@@ -138,111 +139,111 @@ extends Module {
                 PlayerUtils.xynAsOKhN7t();
                 return;
             }
-            if (this.buildMode.get() == BuildMode.flZYoiXwrl && (bl || !HighwayBuilder.l92qSNnpKrYO())) {
+            if (this.buildMode.get() == BuildMode.Dig && (bl || !HighwayBuilder.hasFood())) {
                 if (bl) {
                     this.error("No pickaxe found in inventory...!", new Object[0]);
                 }
-                if (!HighwayBuilder.l92qSNnpKrYO()) {
+                if (!HighwayBuilder.hasFood()) {
                     this.error("No food found in inventory...", new Object[0]);
                 }
                 PlayerUtils.xynAsOKhN7t();
                 return;
             }
-            highwayState.Tne1O2a8S2sVbX(this.dmmGdE2RN9C.player.getBlockPos());
-            highwayState.CEOjBr5G5R(0);
+            highwayState.setCenterPos(this.mc.player.getBlockPos());
+            highwayState.setTicksActive(0);
             InventoryManager.TAdu5cndwWu3A1(false);
-            this.ULOAMKfWE3NZZTj8();
+            this.initHighwayPosition();
             PlayerUtils.jOdDDFXSeWl4(KekNuker.class, "nuker-mode", KekNuker.NukerMode.h9MViB);
-            this.gsYdyKVgv();
-            highwayState.jWrhVf2psx(StatsHandler.BhO5G7());
-            highwayState.Tz7qNAG6();
-            highwayState.Mz2EP5().clear();
-            highwayState.Mz2EP5().add(this.dmmGdE2RN9C.player.getBlockPos());
-            highwayState.Os3dd8a().clear();
+            this.enableCompanionModules();
+            highwayState.setCsvData(StatsHandler.BhO5G7());
+            highwayState.loadLifetimeStatsFromCsv();
+            highwayState.getBlocksToBuild().clear();
+            highwayState.getBlocksToBuild().add(this.mc.player.getBlockPos());
+            highwayState.getBlockBreakAttempts().clear();
             PlayerUtils.jOdDDFXSeWl4(AutoWalk.class, "mode", AutoWalk.Mode.Simple);
             PlayerUtils.jOdDDFXSeWl4(AutoWalk.class, "simple-direction", AutoWalk.Direction.Forwards);
         }
     }
 
     public void onDeactivate() {
-        HighwayState.LmpuWjra().yQzOzveN8BjKJN5();
+        HighwayState.getInstance().saveLifetimeStatsToCsv();
         PlayerUtils.KP44bk(false);
         PathingHelper.xRVyNRV3cB7();
-        HighwayBuilder.V2mbWoNZftH0t();
-        DiscordRPC.wkzyCzfggXudWEsa();
-        HighwayState.LmpuWjra().merMGMToO0ZYtkEn();
+        HighwayBuilder.disableCompanionModules();
+        DiscordRPC.stop();
+        HighwayState.getInstance().reset();
         this.info("Deactivated, saving statistics...", new Object[0]);
     }
 
     @EventHandler
     public void onTick(TickEvent.Pre pre) {
-        HighwayState highwayState = HighwayState.LmpuWjra();
-        if (this.dmmGdE2RN9C.player == null || this.dmmGdE2RN9C.world == null || this.dmmGdE2RN9C.field_1761 == null) {
-            highwayState.CEOjBr5G5R(0);
+        HighwayState highwayState = HighwayState.getInstance();
+        if (this.mc.player == null || this.mc.world == null || this.mc.interactionManager == null) {
+            highwayState.setTicksActive(0);
             return;
         }
-        if (this.dmmGdE2RN9C.player.method_7325()) {
+        if (this.mc.player.isSpectator()) {
             MusheorSystem.debug("Player is probably in queue, waiting...", new Object[0]);
-            highwayState.CEOjBr5G5R(0);
+            highwayState.setTicksActive(0);
             return;
         }
-        highwayState.fjsJhTJB1Q6qDp4F();
-        WorldUtils.jOdDDFXSeWl4(highwayState.yIXEDGFGtS9H(), HighwayBuilder.yaVvWAqooeFn());
+        highwayState.incrementTicksActive();
+        WorldUtils.jOdDDFXSeWl4(highwayState.getTicksActive(), HighwayBuilder.getPavementBlock());
         if (WorldUtils.btLCQHvKVR()) {
             return;
         }
-        if (highwayState.HBAiI3pyGGGxpI2b() != null) {
+        if (highwayState.getPendingBreakPos() != null) {
             PlayerUtils.KP44bk(false);
         }
         if (((Boolean)this.enableDiscordRPC.get()).booleanValue()) {
-            highwayState.cIb0h21P81();
-            if (highwayState.GjvUiGg0HmH6I() >= 200) {
-                highwayState.MS1x7YGHjIg7eB(0);
-                DiscordRPC.urju0X();
+            highwayState.incrementTicksSinceLastAction();
+            if (highwayState.getTicksSinceLastAction() >= 200) {
+                highwayState.setTicksSinceLastAction(0);
+                DiscordRPC.updateActivity();
             }
         } else {
-            DiscordRPC.wkzyCzfggXudWEsa();
+            DiscordRPC.stop();
         }
         Module module = Modules.get().get(EchestFarmer.class);
         boolean bl = ((AutoGap)Modules.get().get(AutoGap.class)).isEating();
-        if (HighwayBuilder.S7TLszvzENsW7() || bl || HighwayBuilder.IuR8CfqY() || HighwayBuilder.zl2vxyh() || PlayerUtils.BT1BimvycZZjsYS() || highwayState.Y775oeIufYz9()) {
+        if (HighwayBuilder.isEating() || bl || HighwayBuilder.isEchestFarming() || HighwayBuilder.isAttacking() || PlayerUtils.BT1BimvycZZjsYS() || highwayState.isResupplyActive()) {
             PlayerUtils.KP44bk(false);
             return;
         }
-        int n = this.pavementBlock.get() == Blocks.field_10540 ? InventoryManager.usJLOV0subXO3(Items.ENDER_CHEST) : 64;
-        int n2 = this.pavementBlock.get() == Blocks.field_10540 ? InventoryManager.usJLOV0subXO3(((Block)this.pavementBlock.get()).asItem()) : 64;
-        highwayState.KDNrzlU9qtrEv(InventoryManager.VYEwzRq(false));
-        highwayState.WOqvNwnejoKApoa(InventoryManager.VYEwzRq(true));
-        if (this.buildMode.get() == BuildMode.e4uKoS) {
-            highwayState.e5oi2ZF(n < 8 || n2 < 8 || highwayState.hJTPuzeVhs9lAR() < 1 || !HighwayBuilder.l92qSNnpKrYO());
+        int n = this.pavementBlock.get() == Blocks.OBSIDIAN ? InventoryManager.usJLOV0subXO3(Items.ENDER_CHEST) : 64;
+        int n2 = this.pavementBlock.get() == Blocks.OBSIDIAN ? InventoryManager.usJLOV0subXO3(((Block)this.pavementBlock.get()).asItem()) : 64;
+        highwayState.setBreakProgress(InventoryManager.VYEwzRq(false));
+        highwayState.setSwapDelayTicks(InventoryManager.VYEwzRq(true));
+        if (this.buildMode.get() == BuildMode.Pave) {
+            highwayState.setNeedsMaterials(n < 8 || n2 < 8 || highwayState.getBreakProgress() < 1 || !HighwayBuilder.hasFood());
         }
-        if (this.buildMode.get() == BuildMode.flZYoiXwrl) {
-            highwayState.e5oi2ZF(highwayState.LTAva3M() < 1 || !HighwayBuilder.l92qSNnpKrYO());
+        if (this.buildMode.get() == BuildMode.Dig) {
+            highwayState.setNeedsMaterials(highwayState.getSwapDelayTicks() < 1 || !HighwayBuilder.hasFood());
         }
-        if (highwayState.XMj1R1A1()) {
+        if (highwayState.isInventoryBusy()) {
             InventoryManager.H02kTTf();
             return;
         }
-        if (highwayState.gsu3U1()) {
-            InventoryManager.mp3zoXQFKUKYj5(highwayState.lzRYRnZcMXfWy6t(), InventoryManager.LrAtLm);
+        if (highwayState.isWaitingForRestock()) {
+            InventoryManager.mp3zoXQFKUKYj5(highwayState.getBaritoneGoal(), InventoryManager.LrAtLm);
             return;
         }
-        if (highwayState.OIExXGL6BNv()) {
-            InventoryManager.mp3zoXQFKUKYj5(highwayState.lzRYRnZcMXfWy6t(), InventoryManager.LrAtLm);
-            MusheorSystem.debug("Restocking %s; Amount: %s", highwayState.lzRYRnZcMXfWy6t(), InventoryManager.LrAtLm);
+        if (highwayState.isRestocking()) {
+            InventoryManager.mp3zoXQFKUKYj5(highwayState.getBaritoneGoal(), InventoryManager.LrAtLm);
+            MusheorSystem.debug("Restocking %s; Amount: %s", highwayState.getBaritoneGoal(), InventoryManager.LrAtLm);
             return;
         }
-        if (highwayState.rpvWtoVonf6GeT() && !module.isActive() && ((Boolean)this.allowEchestFarming.get()).booleanValue()) {
+        if (highwayState.isResupplying() && !module.isActive() && ((Boolean)this.allowEchestFarming.get()).booleanValue()) {
             Handlers.PlefynG();
             MusheorSystem.debug("Running post-echest farmer...", new Object[0]);
             return;
         }
-        if (this.jOdDDFXSeWl4(n2, n) && ((Boolean)this.allowEchestFarming.get()).booleanValue() && this.buildMode.get() == BuildMode.e4uKoS) {
+        if (this.shouldResupplyEchest(n2, n) && ((Boolean)this.allowEchestFarming.get()).booleanValue() && this.buildMode.get() == BuildMode.Pave) {
             Handlers.gANxWblT();
             MusheorSystem.debug("Running echest farmer...", new Object[0]);
             return;
         }
-        if (highwayState.XWpV9Q7() && (!((Boolean)this.allowItemRestocking.get()).booleanValue() || this.mode.get() == Mode.OUSKA4lEld)) {
+        if (highwayState.needsMaterials() && (!((Boolean)this.allowItemRestocking.get()).booleanValue() || this.mode.get() == Mode.Manual)) {
             Object object = "Player is low on materials... Missing: ";
             if (n < 8) {
                 object = (String)object + "Enderchest count: " + n + "/8 ";
@@ -250,32 +251,32 @@ extends Module {
             if (n2 < 8) {
                 object = (String)object + "Obsidian count: " + n2 + "/8 ";
             }
-            if (!HighwayBuilder.l92qSNnpKrYO()) {
+            if (!HighwayBuilder.hasFood()) {
                 object = (String)object + "Food (golden apples blacklisted?) ";
             }
-            if (HighwayBuilder.cghz8iox35K() == BuildMode.e4uKoS && highwayState.LTAva3M() < 1) {
+            if (HighwayBuilder.getBuildMode() == BuildMode.Pave && highwayState.getSwapDelayTicks() < 1) {
                 object = (String)object + "Non SilkTouch pickaxe.";
             }
-            if (HighwayBuilder.cghz8iox35K() == BuildMode.flZYoiXwrl && highwayState.hJTPuzeVhs9lAR() < 1) {
+            if (HighwayBuilder.getBuildMode() == BuildMode.Dig && highwayState.getBreakProgress() < 1) {
                 object = (String)object + "Pickaxe.";
             }
             PlayerUtils.xynAsOKhN7t();
             if (((Boolean)this.isDisconnect.get()).booleanValue()) {
-                PlayerUtils.J2pm2c07elEb5G((String)object);
+                PlayerUtils.setStartX((String)object);
             } else {
                 this.error((String)object, new Object[0]);
             }
             return;
         }
-        if (highwayState.XWpV9Q7()) {
+        if (highwayState.needsMaterials()) {
             if (InventoryManager.QFWUbSJ63lmQY || InventoryManager.NZ3iHWsF) {
                 return;
             }
-            InventoryManager.NrfIVPgqB9 = this.dmmGdE2RN9C.player.getBlockPos();
+            InventoryManager.NrfIVPgqB9 = this.mc.player.getBlockPos();
             PlayerUtils.KP44bk(false);
             InventoryManager.Dzj74FIoxmie();
         }
-        if (this.buildMode.get() == BuildMode.e4uKoS) {
+        if (this.buildMode.get() == BuildMode.Pave) {
             switch (((HighwayType)((Object)this.highwayType.get())).ordinal()) {
                 case 0: {
                     Handlers.Pmh3HuqB53i0Y();
@@ -286,7 +287,7 @@ extends Module {
                 }
             }
         }
-        if (this.buildMode.get() == BuildMode.flZYoiXwrl) {
+        if (this.buildMode.get() == BuildMode.Dig) {
             switch (((HighwayType)((Object)this.highwayType.get())).ordinal()) {
                 case 0: {
                     Handlers.Z6nxChaWC9ymwoio();
@@ -299,31 +300,31 @@ extends Module {
         }
     }
 
-    private boolean jOdDDFXSeWl4(int n, int n2) {
-        HighwayState highwayState = HighwayState.LmpuWjra();
-        if (highwayState.OIExXGL6BNv() || highwayState.jIXFBaSwUWYqAc9() || highwayState.XMj1R1A1() || PlayerUtils.BT1BimvycZZjsYS()) {
+    private boolean shouldResupplyEchest(int obsidianCount, int echestCount) {
+        HighwayState highwayState = HighwayState.getInstance();
+        if (highwayState.isRestocking() || highwayState.jIXFBaSwUWYqAc9() || highwayState.isInventoryBusy() || PlayerUtils.BT1BimvycZZjsYS()) {
             return false;
         }
-        if (this.pavementBlock.get() != Blocks.field_10540) {
+        if (this.pavementBlock.get() != Blocks.OBSIDIAN) {
             return false;
         }
         return n2 > 8 && InventoryManager.ZeOLrA() > 0 && n <= 8;
     }
 
-    private void ULOAMKfWE3NZZTj8() {
-        assert (this.dmmGdE2RN9C.player != null);
-        HighwayState highwayState = HighwayState.LmpuWjra();
-        highwayState.Gt56Sj4a6BWhgB(WorldUtils.eQlnaotm4pUDUmJT());
-        highwayState.J2pm2c07elEb5G(this.dmmGdE2RN9C.player.getX());
-        highwayState.J9PiTNS(this.dmmGdE2RN9C.player.getZ());
-        highwayState.jOdDDFXSeWl4((double)this.dmmGdE2RN9C.player.getX() + 0.5);
-        highwayState.mp3zoXQFKUKYj5((double)this.dmmGdE2RN9C.player.getZ() + 0.5);
-        highwayState.Gt56Sj4a6BWhgB(this.dmmGdE2RN9C.player.getX());
-        highwayState.TAdu5cndwWu3A1(this.dmmGdE2RN9C.player.getY());
-        highwayState.vgrtgn5(this.dmmGdE2RN9C.player.getZ());
+    private void initHighwayPosition() {
+        assert (this.mc.player != null);
+        HighwayState highwayState = HighwayState.getInstance();
+        highwayState.setDirection(WorldUtils.eQlnaotm4pUDUmJT());
+        highwayState.setStartX(this.mc.player.getX());
+        highwayState.setStartZ(this.mc.player.getZ());
+        highwayState.setLastX((double)this.mc.player.getX() + 0.5);
+        highwayState.setLastZ((double)this.mc.player.getZ() + 0.5);
+        highwayState.setCenterX(this.mc.player.getX());
+        highwayState.setCenterY(this.mc.player.getY());
+        highwayState.setCenterZ(this.mc.player.getZ());
     }
 
-    private void gsYdyKVgv() {
+    private void enableCompanionModules() {
         Module module = Modules.get().get(KekNuker.class);
         Module module2 = Modules.get().get(AutoEat.class);
         Module module3 = Modules.get().get(AutoGap.class);
@@ -351,7 +352,7 @@ extends Module {
             module7.toggle();
         }
         if (((Boolean)this.enableDiscordRPC.get()).booleanValue()) {
-            DiscordRPC.EyGoWQcn();
+            DiscordRPC.start();
         }
         if (((Boolean)this.enableFreeLook.get()).booleanValue()) {
             PlayerUtils.Gd2ks78ySQq40();
@@ -364,7 +365,7 @@ extends Module {
         }
     }
 
-    public static void V2mbWoNZftH0t() {
+    public static void disableCompanionModules() {
         Module module3;
         Module module2;
         for (Module module3 : module2 = new Module[]{Modules.get().get(EchestFarmer.class), Modules.get().get(KekNuker.class), Modules.get().get(AutoWalk.class), Modules.get().get(HotbarReplenish.class), Modules.get().get(FreeLook.class), Modules.get().get(SourceRemover.class), Modules.get().get(InventoryCleaner.class)}) {
@@ -389,170 +390,170 @@ extends Module {
         }
     }
 
-    public static boolean l92qSNnpKrYO() {
+    public static boolean hasFood() {
         List list = (List)((AutoEat)Modules.get().get(AutoEat.class)).blacklist.get();
-        for (int i = 0; i < Objects.requireNonNull(MinecraftClient.getInstance().player).getId().field_7547.size(); ++i) {
-            ItemStack ItemStack2 = MinecraftClient.getInstance().player.getId().method_5438(i);
-            if (ItemStack2.method_57353().method_57832(MutableText.field_50075) && !(ItemStack2.method_57353() instanceof class_2480) && !list.contains(ItemStack2.getStack())) {
+        for (int i = 0; i < Objects.requireNonNull(MinecraftClient.getInstance().player).getInventory().main.size(); ++i) {
+            ItemStack ItemStack2 = MinecraftClient.getInstance().player.getInventory().getStack(i);
+            if (ItemStack2.getItem().contains(DataComponentTypes.FOOD) && !(ItemStack2.getItem() instanceof SuspiciousStewItem) && !list.contains(ItemStack2.getItem())) {
                 return true;
             }
-            if (ItemStack2.getStack() != Items.field_8367 || list.contains(ItemStack2.getStack())) continue;
+            if (ItemStack2.getStack() != Items.GOLDEN_APPLE || list.contains(ItemStack2.getItem())) continue;
             return true;
         }
         return false;
     }
 
-    public static void jOdDDFXSeWl4(BlockState BlockState2) {
-        HighwayState highwayState = HighwayState.LmpuWjra();
-        if (BlockState2.getBlock() == Blocks.field_10540) {
-            highwayState.orXwdS7X2l();
+    public static void onBlockMined(BlockState BlockState2) {
+        HighwayState highwayState = HighwayState.getInstance();
+        if (BlockState2.getBlock() == Blocks.OBSIDIAN) {
+            highwayState.incrementSessionObsidianMined();
         }
-        if (BlockState2.getBlock() == Blocks.field_10515) {
-            highwayState.qMP0ctta2esan3W();
+        if (BlockState2.getBlock() == Blocks.NETHERRACK) {
+            highwayState.incrementSessionLavaBuckets();
         }
-        if (BlockState2.getBlock() == Blocks.field_10443) {
-            highwayState.J9PESj();
+        if (BlockState2.getBlock() == Blocks.ENDER_CHEST) { // was: field_10443
+            highwayState.incrementSessionMiscMined();
         }
     }
 
-    public static boolean S7TLszvzENsW7() {
+    public static boolean isEating() {
         return ((AutoEat)Modules.get().get(AutoEat.class)).eating || ((AutoGap)Modules.get().get(AutoGap.class)).isEating();
     }
 
-    public static boolean zl2vxyh() {
+    public static boolean isAttacking() {
         return ((KillAura)Modules.get().get(KillAura.class)).attacking;
     }
 
-    public static WorldUtils.Direction8 kLIvClyeu() {
-        return HighwayState.LmpuWjra().P7WK4vInkqbLg();
+    public static WorldUtils.Direction8 getDirection() {
+        return HighwayState.getInstance().getDirection();
     }
 
-    public static boolean IuR8CfqY() {
+    public static boolean isEchestFarming() {
         return EchestFarmer.Nr0B0YDZRAaA.isActive();
     }
 
-    public static BuildMode cghz8iox35K() {
+    public static BuildMode getBuildMode() {
         return (BuildMode)((Object)HighwayBuilder.INSTANCE.buildMode.get());
     }
 
-    public static Mode CcyVC0KkRVrmqA() {
+    public static Mode getMode() {
         return (Mode)((Object)HighwayBuilder.INSTANCE.mode.get());
     }
 
-    public static HighwayType Nr0B0YDZRAaA() {
+    public static HighwayType getHighwayType() {
         return (HighwayType)((Object)HighwayBuilder.INSTANCE.highwayType.get());
     }
 
-    public static int oq3TU4VRVWuh() {
+    public static int getPavementWidth() {
         return (Integer)HighwayBuilder.INSTANCE.pavementWidth.get();
     }
 
-    public static boolean CduCWLxmO() {
+    public static boolean isRemoveBlocksAboveRails() {
         return (Boolean)HighwayBuilder.INSTANCE.removeBlocksAboveRails.get();
     }
 
-    public static boolean aYWh0ZNA4Rd() {
+    public static boolean isReplaceCryingObsidian() {
         return (Boolean)HighwayBuilder.INSTANCE.replaceCryingObsidian.get();
     }
 
-    public static boolean oknfyMh() {
+    public static boolean isPauseOnLag() {
         return (Boolean)HighwayBuilder.INSTANCE.pauseOnLag.get();
     }
 
-    public static int J6PuzyzqvmhV() {
+    public static int getLagThreshold() {
         return (Integer)HighwayBuilder.INSTANCE.lagThreshold.get();
     }
 
-    public static Block yaVvWAqooeFn() {
+    public static Block getPavementBlock() {
         return (Block)HighwayBuilder.INSTANCE.pavementBlock.get();
     }
 
-    public static boolean fGLoB1zTvFf() {
+    public static boolean isPlaceRails() {
         return (Boolean)HighwayBuilder.INSTANCE.placeRails.get();
     }
 
-    public static boolean dmmGdE2RN9C() {
+    public static boolean isPlaceLeftRails() {
         return (Boolean)HighwayBuilder.INSTANCE.placeLeftRails.get();
     }
 
-    public static boolean byNtgqgBf0C() {
+    public static boolean isPlaceRightRails() {
         return (Boolean)HighwayBuilder.INSTANCE.placeRightRails.get();
     }
 
-    public static Block e4uKoS() {
+    public static Block getScaffoldBlock() {
         return (Block)HighwayBuilder.INSTANCE.scaffoldBlock.get();
     }
 
-    public static ScaffoldMode flZYoiXwrl() {
+    public static ScaffoldMode getScaffoldMode() {
         return (ScaffoldMode)((Object)HighwayBuilder.INSTANCE.scaffoldMode.get());
     }
 
-    public static boolean RzemQrYtv7d0h() {
+    public static boolean isScaffoldLeftRail() {
         return (Boolean)HighwayBuilder.INSTANCE.scaffoldLeftRail.get();
     }
 
-    public static boolean b76P5ieurZIX() {
+    public static boolean isScaffoldRightRail() {
         return (Boolean)HighwayBuilder.INSTANCE.scaffoldRightRail.get();
     }
 
-    public static boolean xpLMsAtAuXAx() {
+    public static boolean isRemoveAnnoyingLava() {
         return (Boolean)HighwayBuilder.INSTANCE.removeAnnoyingLava.get();
     }
 
-    public static boolean ydklDMif6Ghqm0() {
+    public static boolean isFillCeiling() {
         return (Boolean)HighwayBuilder.INSTANCE.fillCeiling.get();
     }
 
-    public static boolean jll9Iyc1Ftxi() {
+    public static boolean isAllowItemRestocking() {
         return (Boolean)HighwayBuilder.INSTANCE.allowItemRestocking.get();
     }
 
-    public static boolean OUSKA4lEld() {
+    public static boolean isStoreBrokenPickaxes() {
         return (Boolean)HighwayBuilder.INSTANCE.storeBrokenPickaxes.get();
     }
 
-    public static boolean dEyMylfkRxcem4F() {
+    public static boolean isAllowShulkerRestocking() {
         return (Boolean)HighwayBuilder.INSTANCE.allowShulkerRestocking.get();
     }
 
-    public static boolean oGrnfoe87ZeN() {
+    public static boolean isAllowEchestShulkerRestocking() {
         return (Boolean)HighwayBuilder.INSTANCE.allowEchestShulkerRestocking.get();
     }
 
-    public static boolean nQgi06() {
+    public static boolean isAllowToolShulkerRestocking() {
         return (Boolean)HighwayBuilder.INSTANCE.allowToolShulkerRestocking.get();
     }
 
     @EventHandler
     private void onRender3D(Render3DEvent render3DEvent) {
-        HighwayState highwayState = HighwayState.LmpuWjra();
-        assert (this.dmmGdE2RN9C.player != null);
-        if (highwayState.P7WK4vInkqbLg() == null) {
+        HighwayState highwayState = HighwayState.getInstance();
+        assert (this.mc.player != null);
+        if (highwayState.getDirection() == null) {
             return;
         }
-        if (HighwayState.LmpuWjra().Icks58Pk4vQH3() == null || HighwayState.LmpuWjra().KaWPzeyl1xVKHWo() == null || HighwayState.LmpuWjra().A02ApsqZGj() == null) {
+        if (HighwayState.getInstance().getCenterX() == null || HighwayState.getInstance().getCenterY() == null || HighwayState.getInstance().getCenterZ() == null) {
             return;
         }
-        if (highwayState.JDwgf5() == null || highwayState.yyKeW1d7hG() == null) {
+        if (highwayState.getLastX() == null || highwayState.getLastZ() == null) {
             return;
         }
         if (((Boolean)MusheorSystem.Manager.placeRender.get()).booleanValue()) {
             ArrayList<BlockPos> arrayList = new ArrayList<BlockPos>(List.of());
-            for (BlockPos BlockPos2 : BlockPositions.jOdDDFXSeWl4(2, 3, HighwayBuilder.dmmGdE2RN9C(), HighwayBuilder.byNtgqgBf0C())) {
+            for (BlockPos BlockPos2 : BlockPositions.jOdDDFXSeWl4(2, 3, HighwayBuilder.isPlaceLeftRails(), HighwayBuilder.isPlaceRightRails())) {
                 if (!BlockUtils.canPlace((BlockPos)BlockPos2, (boolean)true)) continue;
                 arrayList.add(BlockPos2);
             }
             ArrayList arrayList2 = new ArrayList(List.of());
-            for (BlockPos BlockPos3 : BlockPositions.Gt56Sj4a6BWhgB(2, 2, HighwayBuilder.dmmGdE2RN9C(), HighwayBuilder.byNtgqgBf0C())) {
+            for (BlockPos BlockPos3 : BlockPositions.Gt56Sj4a6BWhgB(2, 2, HighwayBuilder.isPlaceLeftRails(), HighwayBuilder.isPlaceRightRails())) {
                 if (!BlockUtils.canPlace((BlockPos)BlockPos3, (boolean)true)) continue;
                 arrayList2.add(BlockPos3);
             }
-            if (this.buildMode.get() == BuildMode.e4uKoS) {
-                if (this.highwayType.get() == HighwayType.b76P5ieurZIX) {
-                    RenderUtils.jOdDDFXSeWl4(render3DEvent, arrayList, HighwayBuilder.yaVvWAqooeFn());
+            if (this.buildMode.get() == BuildMode.Pave) {
+                if (this.highwayType.get() == HighwayType.Cardinal) {
+                    RenderUtils.jOdDDFXSeWl4(render3DEvent, arrayList, HighwayBuilder.getPavementBlock());
                 }
-                if (this.highwayType.get() == HighwayType.xpLMsAtAuXAx) {
-                    RenderUtils.jOdDDFXSeWl4(render3DEvent, arrayList2, HighwayBuilder.yaVvWAqooeFn());
+                if (this.highwayType.get() == HighwayType.Diagonal) {
+                    RenderUtils.jOdDDFXSeWl4(render3DEvent, arrayList2, HighwayBuilder.getPavementBlock());
                 }
             }
         }
@@ -560,94 +561,94 @@ extends Module {
 
     public static final class BuildMode
     extends Enum<BuildMode> {
-        public static final /* enum */ BuildMode e4uKoS = new BuildMode();
-        public static final /* enum */ BuildMode flZYoiXwrl = new BuildMode();
-        private static final /* synthetic */ BuildMode[] RzemQrYtv7d0h;
+        public static final /* enum */ BuildMode Pave = new BuildMode();
+        public static final /* enum */ BuildMode Dig = new BuildMode();
+        private static final /* synthetic */ BuildMode[] $VALUES;
 
         public static BuildMode[] values() {
-            return (BuildMode[])RzemQrYtv7d0h.clone();
+            return (BuildMode[])$VALUES.clone();
         }
 
         public static BuildMode valueOf(String string) {
             return Enum.valueOf(BuildMode.class, string);
         }
 
-        private static /* synthetic */ BuildMode[] aLormWyi9q() {
-            return new BuildMode[]{e4uKoS, flZYoiXwrl};
+        private static /* synthetic */ BuildMode[] $init() {
+            return new BuildMode[]{Pave, Dig};
         }
 
         static {
-            RzemQrYtv7d0h = BuildMode.aLormWyi9q();
+            $VALUES = BuildMode.$init();
         }
     }
 
     public static final class Mode
     extends Enum<Mode> {
-        public static final /* enum */ Mode jll9Iyc1Ftxi = new Mode();
-        public static final /* enum */ Mode OUSKA4lEld = new Mode();
-        private static final /* synthetic */ Mode[] dEyMylfkRxcem4F;
+        public static final /* enum */ Mode Auto = new Mode();
+        public static final /* enum */ Mode Manual = new Mode();
+        private static final /* synthetic */ Mode[] $VALUES;
 
         public static Mode[] values() {
-            return (Mode[])dEyMylfkRxcem4F.clone();
+            return (Mode[])$VALUES.clone();
         }
 
         public static Mode valueOf(String string) {
             return Enum.valueOf(Mode.class, string);
         }
 
-        private static /* synthetic */ Mode[] MJaOMSip8bg() {
-            return new Mode[]{jll9Iyc1Ftxi, OUSKA4lEld};
+        private static /* synthetic */ Mode[] $init() {
+            return new Mode[]{Auto, Manual};
         }
 
         static {
-            dEyMylfkRxcem4F = Mode.MJaOMSip8bg();
+            $VALUES = Mode.$init();
         }
     }
 
     public static final class HighwayType
     extends Enum<HighwayType> {
-        public static final /* enum */ HighwayType b76P5ieurZIX = new HighwayType();
-        public static final /* enum */ HighwayType xpLMsAtAuXAx = new HighwayType();
-        private static final /* synthetic */ HighwayType[] ydklDMif6Ghqm0;
+        public static final /* enum */ HighwayType Cardinal = new HighwayType();
+        public static final /* enum */ HighwayType Diagonal = new HighwayType();
+        private static final /* synthetic */ HighwayType[] $VALUES;
 
         public static HighwayType[] values() {
-            return (HighwayType[])ydklDMif6Ghqm0.clone();
+            return (HighwayType[])$VALUES.clone();
         }
 
         public static HighwayType valueOf(String string) {
             return Enum.valueOf(HighwayType.class, string);
         }
 
-        private static /* synthetic */ HighwayType[] HMBsFFw4lHD() {
-            return new HighwayType[]{b76P5ieurZIX, xpLMsAtAuXAx};
+        private static /* synthetic */ HighwayType[] $init() {
+            return new HighwayType[]{Cardinal, Diagonal};
         }
 
         static {
-            ydklDMif6Ghqm0 = HighwayType.HMBsFFw4lHD();
+            $VALUES = HighwayType.$init();
         }
     }
 
     public static final class ScaffoldMode
     extends Enum<ScaffoldMode> {
-        public static final /* enum */ ScaffoldMode oGrnfoe87ZeN = new ScaffoldMode();
-        public static final /* enum */ ScaffoldMode nQgi06 = new ScaffoldMode();
-        public static final /* enum */ ScaffoldMode aLormWyi9q = new ScaffoldMode();
-        private static final /* synthetic */ ScaffoldMode[] HMBsFFw4lHD;
+        public static final /* enum */ ScaffoldMode None = new ScaffoldMode();
+        public static final /* enum */ ScaffoldMode GrimScaffold = new ScaffoldMode();
+        public static final /* enum */ ScaffoldMode AirPlace = new ScaffoldMode();
+        private static final /* synthetic */ ScaffoldMode[] $VALUES;
 
         public static ScaffoldMode[] values() {
-            return (ScaffoldMode[])HMBsFFw4lHD.clone();
+            return (ScaffoldMode[])$VALUES.clone();
         }
 
         public static ScaffoldMode valueOf(String string) {
             return Enum.valueOf(ScaffoldMode.class, string);
         }
 
-        private static /* synthetic */ ScaffoldMode[] ofyUrdkXD264() {
-            return new ScaffoldMode[]{oGrnfoe87ZeN, nQgi06, aLormWyi9q};
+        private static /* synthetic */ ScaffoldMode[] $init() {
+            return new ScaffoldMode[]{None, GrimScaffold, AirPlace};
         }
 
         static {
-            HMBsFFw4lHD = ScaffoldMode.ofyUrdkXD264();
+            $VALUES = ScaffoldMode.$init();
         }
     }
 }

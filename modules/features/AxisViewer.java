@@ -16,7 +16,7 @@ import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.world.Dimension;
 import meteordevelopment.orbit.EventHandler;
 import musheor.musheor;
-import net.minecraft.Vec3d;
+import net.minecraft.util.math.Vec3d;
 
 public class AxisViewer
 extends Module {
@@ -214,7 +214,7 @@ extends Module {
     }
 
     private void jOdDDFXSeWl4(Render3DEvent render3DEvent, Vec3d Vec3d2, Vec3d Vec3d3, Color color) {
-        render3DEvent.renderer.line(Vec3d2.method_10216(), Vec3d2.method_10214(), Vec3d2.method_10215(), Vec3d3.method_10216(), Vec3d3.method_10214(), Vec3d3.method_10215(), color);
+        render3DEvent.renderer.line(Vec3d2.getX(), Vec3d2.getY(), Vec3d2.getZ(), Vec3d3.getX(), Vec3d3.getY(), Vec3d3.getZ(), color);
     }
 
     public static final class AxisType

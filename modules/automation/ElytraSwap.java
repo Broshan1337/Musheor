@@ -8,9 +8,9 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.orbit.EventHandler;
 import musheor.musheor;
-import net.minecraft.class_1304;   // EquipmentSlot
-import net.minecraft.ItemStack;   // ItemStack
-import net.minecraft.Items;   // Items
+import net.minecraft.entity.EquipmentSlot;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
 
 /**
  * Automatically swaps the worn elytra with a fresh one from the player's
@@ -31,25 +31,25 @@ public class ElytraSwap extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre pre) {
-        if (this.mc.field_1724 == null || this.mc.field_1687 == null) return;
+        if (this.mc.player == null || this.mc.world == null) return;
 
         // Only act if an elytra is equipped in the CHEST slot
-        if (!this.mc.player.method_6118(class_1304.field_6174).getStack() // getEquippedStack(CHEST).getItem()
-                .equals(Items.field_8833)) return;  // Items.ELYTRA
+        if (!this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getStack() // getEquippedStack(CHEST).getItem()
+                .equals(Items.ELYTRA)) return;  // Items.ELYTRA
 
         // Calculate remaining durability = maxDurability − damage
-        int worn = this.mc.player.method_6118(class_1304.field_6174).method_7936() // getMaxDamage
-                 - this.mc.player.method_6118(class_1304.field_6174).method_7919(); // getDamage
+        int worn = this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getMaxDamage() // getMaxDamage
+                 - this.mc.player.getEquippedStack(EquipmentSlot.CHEST).getDamage(); // getDamage
 
         if (worn <= (Integer) this.durabilityThreshold.get()) {
             // Find a fresh elytra in the main inventory
-            for (int i = 0; i < this.mc.player.getId().field_7547.size(); ++i) {
-                ItemStack stack = this.mc.player.getId().method_5438(i); // getStack(i)
-                int remaining = stack.method_7936() - stack.method_7919(); // maxDamage − damage
-                if (!stack.getStack().equals(Items.field_8833)
+            for (int i = 0; i < this.mc.player.getInventory().main.size(); ++i) {
+                ItemStack stack = this.mc.player.getInventory().getStack(i); // getStack(i)
+                int remaining = stack.getMaxDamage() - stack.getDamage(); // maxDamage − damage
+                if (!stack.getItem().equals(Items.ELYTRA)
                         || remaining <= (Integer) this.durabilityThreshold.get()) continue;
                 // Move fresh elytra to chest armor slot (slot index 2)
-                InvUtils.move().from(this.mc.player.getId().method_7395(stack)).toArmor(2);
+                InvUtils.move().from(this.mc.player.getInventory().getSlotWithStack(stack)).toArmor(2);
                 break;
             }
         }

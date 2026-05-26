@@ -6,10 +6,10 @@ import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import musheor.musheor;
-import net.minecraft.Formatting;
-import net.minecraft.ScreenHandler;
-import net.minecraft.Slot;
-import net.minecraft.MinecraftClient;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.text.Style;
+import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 
 public class TestModule
 extends Module {
@@ -27,7 +27,7 @@ extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre pre) {
-        TestModule.bsaKtrf.player.method_7353((ScreenHandler)ScreenHandler.method_43470((String)"Test").method_10862(Slot.field_24360.method_10977(Formatting.field_1065).method_10982(Boolean.valueOf(true))), true);
+        TestModule.bsaKtrf.player.sendMessage(Text.literal("Test").setStyle(Style.EMPTY.withColor(Formatting.GOLD).withBold(Boolean.valueOf(true))), true);
     }
 
     @EventHandler

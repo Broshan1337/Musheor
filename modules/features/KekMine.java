@@ -23,38 +23,38 @@ import musheor.musheor;
 import musheor.utils.InventoryManager;
 import musheor.utils.RenderUtils;
 import musheor.utils.system.MusheorSystem;
-import net.minecraft.class_1292;
-import net.minecraft.Hand;
-import net.minecraft.LivingEntity;
-import net.minecraft.ItemStack;
-import net.minecraft.class_1893;
-import net.minecraft.class_1922;
-import net.minecraft.Blocks;
-import net.minecraft.Block;
-import net.minecraft.BlockPos;
-import net.minecraft.Direction;
-import net.minecraft.class_238;
-import net.minecraft.BlockState;
-import net.minecraft.class_2846;
-import net.minecraft.class_2868;
-import net.minecraft.MinecraftClient;
-import net.minecraft.class_3486;
-import net.minecraft.class_5134;
-import net.minecraft.class_5321;
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.Blocks;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.enchantment.Enchantments;
+import net.minecraft.entity.LivingEntity;
+import net.minecraft.entity.attribute.EntityAttributes;
+import net.minecraft.entity.effect.StatusEffectUtil;
+import net.minecraft.entity.effect.StatusEffects;
+import net.minecraft.item.ItemStack;
+import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
+import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.tag.FluidTags;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Direction;
+import net.minecraft.world.BlockView;
 
 public class KekMine
 extends Module {
-    private static final MinecraftClient F41rraDXnaj = MinecraftClient.getInstance();
+    private static final MinecraftClient mc = MinecraftClient.getInstance();
     private final SettingGroup sgRender;
     public final Setting<Boolean> autoRebreak;
     private final Setting<Boolean> silentSwap;
     private final Setting<Boolean> globalRendering;
     private final Setting<SettingColor> renderColor;
-    public static KekMine YnQ4ChsDR;
-    private MineContext NZkZx8MJ67Zw;
-    private MineContext jIXFBaSwUWYqAc9;
-    public BlockPos gsu3U1;
-    public final Deque<BlockPos> OIExXGL6BNv;
+    public static KekMine INSTANCE;
+    private MineContext primaryMine;
+    private MineContext secondaryMine;
+    public BlockPos lastBreakPos;
+    public final Deque<BlockPos> miningQueue;
 
     public KekMine() {
         super(musheor.MAIN, "KekMine", "Grim-safe packet miner with queue and double break.");
@@ -63,308 +63,308 @@ extends Module {
         this.silentSwap = this.settings.getDefaultGroup().add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("silent-swap")).description("Breaks the block without holding the pickaxe")).defaultValue((Object)false)).build());
         this.globalRendering = this.sgRender.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("global-rendering")).defaultValue((Object)true)).description("Synchronize rendering with Musheor-Tab")).build());
         this.renderColor = this.sgRender.add((Setting)((ColorSetting.Builder)((ColorSetting.Builder)((ColorSetting.Builder)new ColorSetting.Builder().name("color")).defaultValue(new SettingColor(Color.cyan)).description("Custom color for rendering (lines / wireframe)")).visible(() -> (Boolean)this.globalRendering.get() == false)).build());
-        this.OIExXGL6BNv = new ArrayDeque<BlockPos>();
-        YnQ4ChsDR = this;
+        this.miningQueue = new ArrayDeque<BlockPos>();
+        INSTANCE = this;
     }
 
-    public void usJLOV0subXO3(BlockPos BlockPos2) {
-        if (KekMine.F41rraDXnaj.world == null) {
+    public void tryMineBlock(BlockPos pos) {
+        if (KekMine.mc.world == null) {
             return;
         }
-        if (!BlockUtils.canBreak((BlockPos)BlockPos2, (BlockState)KekMine.F41rraDXnaj.world.getBlockState(BlockPos2))) {
+        if (!BlockUtils.canBreak((BlockPos)pos, (BlockState)KekMine.mc.world.getBlockState(pos))) {
             return;
         }
-        if (this.Y9BgxR(BlockPos2)) {
+        if (this.isOutOfRange(pos)) {
             return;
         }
-        if (this.ZbTtF5KYyGL9YXed(BlockPos2)) {
+        if (this.isAlreadyMining(pos)) {
             return;
         }
-        this.TAdu5cndwWu3A1(BlockPos2, KekMine.F41rraDXnaj.world.getBlockState(BlockPos2));
+        this.queueBlock(pos, KekMine.mc.world.getBlockState(pos));
     }
 
-    public boolean ZbTtF5KYyGL9YXed(BlockPos BlockPos2) {
-        if (this.NZkZx8MJ67Zw != null && this.NZkZx8MJ67Zw.XMj1R1A1.equals((Object)BlockPos2)) {
+    public boolean isAlreadyMining(BlockPos pos) {
+        if (this.primaryMine != null && this.primaryMine.pos.equals((Object)pos)) {
             return true;
         }
-        if (this.jIXFBaSwUWYqAc9 != null && this.jIXFBaSwUWYqAc9.XMj1R1A1.equals((Object)BlockPos2)) {
+        if (this.secondaryMine != null && this.secondaryMine.pos.equals((Object)pos)) {
             return true;
         }
-        return this.OIExXGL6BNv.contains(BlockPos2);
+        return this.miningQueue.contains(pos);
     }
 
-    public boolean og2KVvNzA() {
-        return this.NZkZx8MJ67Zw == null && this.jIXFBaSwUWYqAc9 == null && !this.OIExXGL6BNv.isEmpty();
+    public boolean isQueueActive() {
+        return this.primaryMine == null && this.secondaryMine == null && !this.miningQueue.isEmpty();
     }
 
-    public static void e5oi2ZF(BlockPos BlockPos2) {
-        if (YnQ4ChsDR.ZbTtF5KYyGL9YXed(BlockPos2)) {
+    public static void startMining(BlockPos pos) {
+        if (INSTANCE.isAlreadyMining(pos)) {
             return;
         }
-        if (BlockPos2 != null) {
-            MineContext mineContext = new MineContext(BlockPos2, KekMine.F41rraDXnaj.world.getBlockState(BlockPos2), true);
-            KekMine.Gt56Sj4a6BWhgB(BlockPos2, KekMine.F41rraDXnaj.world.getBlockState(BlockPos2));
-            YnQ4ChsDR.L5CF0C6jx0T17H4I(BlockPos2);
-            YnQ4ChsDR.mp3zoXQFKUKYj5(mineContext, (Boolean)KekMine.YnQ4ChsDR.silentSwap.get());
+        if (pos != null) {
+            MineContext mineContext = new MineContext(pos, KekMine.mc.world.getBlockState(pos), true);
+            KekMine.swapToTool(pos, KekMine.mc.world.getBlockState(pos));
+            INSTANCE.sendBreakPacket(pos);
+            INSTANCE.completeMining(mineContext, (Boolean)KekMine.INSTANCE.silentSwap.get());
         }
     }
 
     public void onDeactivate() {
-        this.NZkZx8MJ67Zw = null;
-        this.jIXFBaSwUWYqAc9 = null;
-        this.OIExXGL6BNv.clear();
-        this.gsu3U1 = null;
+        this.primaryMine = null;
+        this.secondaryMine = null;
+        this.miningQueue.clear();
+        this.lastBreakPos = null;
     }
 
-    private static void Gt56Sj4a6BWhgB(BlockPos BlockPos2, BlockState BlockState2) {
-        if (!InventoryManager.TAdu5cndwWu3A1(BlockState2).setStack() && !((Boolean)KekMine.YnQ4ChsDR.silentSwap.get()).booleanValue()) {
-            InventoryManager.J2pm2c07elEb5G(BlockPos2);
+    private static void swapToTool(BlockPos pos, BlockState state) {
+        if (!InventoryManager.getBestToolForBlock(state).isEmpty() && !((Boolean)KekMine.INSTANCE.silentSwap.get()).booleanValue()) {
+            InventoryManager.equipBestToolForBlock(pos);
         }
     }
 
-    public void TAdu5cndwWu3A1(BlockPos BlockPos2, BlockState BlockState2) {
-        if (this.ZbTtF5KYyGL9YXed(BlockPos2)) {
+    public void queueBlock(BlockPos pos, BlockState state) {
+        if (this.isAlreadyMining(pos)) {
             return;
         }
-        if (HighwayBuilder.S7TLszvzENsW7()) {
+        if (HighwayBuilder.isEating()) {
             return;
         }
-        if (!(this.NZkZx8MJ67Zw == null || this.jIXFBaSwUWYqAc9 == null && ((Boolean)MusheorSystem.Manager.doubleBreak.get()).booleanValue())) {
-            if (!this.OIExXGL6BNv.contains(BlockPos2)) {
-                this.OIExXGL6BNv.addLast(BlockPos2);
+        if (!(this.primaryMine == null || this.secondaryMine == null && ((Boolean)MusheorSystem.Manager.doubleBreak.get()).booleanValue())) {
+            if (!this.miningQueue.contains(pos)) {
+                this.miningQueue.addLast(pos);
             }
             return;
         }
-        if (this.NZkZx8MJ67Zw == null) {
-            KekMine.Gt56Sj4a6BWhgB(BlockPos2, BlockState2);
-            this.NZkZx8MJ67Zw = new MineContext(BlockPos2, BlockState2, true);
-            this.L5CF0C6jx0T17H4I(BlockPos2);
-        } else if (((Boolean)MusheorSystem.Manager.doubleBreak.get()).booleanValue() && this.jIXFBaSwUWYqAc9 == null) {
-            this.jOdDDFXSeWl4(class_2846.class_2847.field_12973, this.NZkZx8MJ67Zw.XMj1R1A1);
-            this.jIXFBaSwUWYqAc9 = new MineContext(this.NZkZx8MJ67Zw.XMj1R1A1, this.NZkZx8MJ67Zw.rpvWtoVonf6GeT, false);
-            this.NZkZx8MJ67Zw = new MineContext(BlockPos2, BlockState2, true);
-            this.L5CF0C6jx0T17H4I(this.NZkZx8MJ67Zw.XMj1R1A1);
+        if (this.primaryMine == null) {
+            KekMine.swapToTool(pos, state);
+            this.primaryMine = new MineContext(pos, state, true);
+            this.sendBreakPacket(pos);
+        } else if (((Boolean)MusheorSystem.Manager.doubleBreak.get()).booleanValue() && this.secondaryMine == null) {
+            this.sendBlockAction(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, this.primaryMine.pos);
+            this.secondaryMine = new MineContext(this.primaryMine.pos, this.primaryMine.state, false);
+            this.primaryMine = new MineContext(pos, state, true);
+            this.sendBreakPacket(this.primaryMine.pos);
         }
     }
 
     @EventHandler
     private void onTick(TickEvent.Pre pre) {
-        if (KekMine.F41rraDXnaj.player == null || KekMine.F41rraDXnaj.world == null) {
+        if (KekMine.mc.player == null || KekMine.mc.world == null) {
             return;
         }
-        if (HighwayBuilder.S7TLszvzENsW7()) {
-            this.NZkZx8MJ67Zw = null;
-            this.jIXFBaSwUWYqAc9 = null;
+        if (HighwayBuilder.isEating()) {
+            this.primaryMine = null;
+            this.secondaryMine = null;
             return;
         }
-        if (this.gsu3U1 != null && ((Boolean)this.autoRebreak.get()).booleanValue() && this.NZkZx8MJ67Zw == null && this.jIXFBaSwUWYqAc9 == null && !KekMine.F41rraDXnaj.world.getBlockState(this.gsu3U1).isAir()) {
-            this.jOdDDFXSeWl4(new MineContext(this.gsu3U1, KekMine.F41rraDXnaj.world.getBlockState(this.gsu3U1), false), (Boolean)this.silentSwap.get());
+        if (this.lastBreakPos != null && ((Boolean)this.autoRebreak.get()).booleanValue() && this.primaryMine == null && this.secondaryMine == null && !KekMine.mc.world.getBlockState(this.lastBreakPos).isAir()) {
+            this.sendBreakWithSwap(new MineContext(this.lastBreakPos, KekMine.mc.world.getBlockState(this.lastBreakPos), false), (Boolean)this.silentSwap.get());
             return;
         }
-        this.IErgCCM();
-        if (this.jIXFBaSwUWYqAc9 != null && this.jIXFBaSwUWYqAc9.xZ3kyYFbKEKAvqOe() >= 1.0) {
-            this.mp3zoXQFKUKYj5(this.jIXFBaSwUWYqAc9, (Boolean)KekMine.YnQ4ChsDR.silentSwap.get());
+        this.cleanupStaleEntries();
+        if (this.secondaryMine != null && this.secondaryMine.getBreakProgress() >= 1.0) {
+            this.completeMining(this.secondaryMine, (Boolean)KekMine.INSTANCE.silentSwap.get());
         }
-        if (this.NZkZx8MJ67Zw != null && this.NZkZx8MJ67Zw.xZ3kyYFbKEKAvqOe() >= 1.0) {
-            this.mp3zoXQFKUKYj5(this.NZkZx8MJ67Zw, (Boolean)KekMine.YnQ4ChsDR.silentSwap.get());
+        if (this.primaryMine != null && this.primaryMine.getBreakProgress() >= 1.0) {
+            this.completeMining(this.primaryMine, (Boolean)KekMine.INSTANCE.silentSwap.get());
         }
-        this.oQw0r3Nc();
+        this.processQueue();
     }
 
-    private void IErgCCM() {
-        if (this.NZkZx8MJ67Zw != null && this.BX92A0OIIvD9(this.NZkZx8MJ67Zw.XMj1R1A1)) {
-            this.NZkZx8MJ67Zw = null;
+    private void cleanupStaleEntries() {
+        if (this.primaryMine != null && this.shouldCancelMining(this.primaryMine.pos)) {
+            this.primaryMine = null;
         }
-        if (this.jIXFBaSwUWYqAc9 != null && this.BX92A0OIIvD9(this.jIXFBaSwUWYqAc9.XMj1R1A1)) {
-            this.jIXFBaSwUWYqAc9 = null;
+        if (this.secondaryMine != null && this.shouldCancelMining(this.secondaryMine.pos)) {
+            this.secondaryMine = null;
         }
-        this.OIExXGL6BNv.removeIf(this::BX92A0OIIvD9);
+        this.miningQueue.removeIf(this::shouldCancelMining);
     }
 
-    private boolean BX92A0OIIvD9(BlockPos BlockPos2) {
-        BlockState BlockState2 = KekMine.F41rraDXnaj.world.getBlockState(BlockPos2);
-        return BlockState2.isAir() || this.Y9BgxR(BlockPos2);
+    private boolean shouldCancelMining(BlockPos pos) {
+        BlockState blockState = KekMine.mc.world.getBlockState(pos);
+        return blockState.isAir() || this.isOutOfRange(pos);
     }
 
-    private void oQw0r3Nc() {
-        if (this.OIExXGL6BNv.isEmpty()) {
+    private void processQueue() {
+        if (this.miningQueue.isEmpty()) {
             return;
         }
-        if (this.NZkZx8MJ67Zw == null) {
-            BlockPos BlockPos2 = this.OIExXGL6BNv.pollFirst();
-            BlockState BlockState2 = KekMine.F41rraDXnaj.world.getBlockState(BlockPos2);
-            KekMine.Gt56Sj4a6BWhgB(BlockPos2, BlockState2);
-            this.NZkZx8MJ67Zw = new MineContext(BlockPos2, BlockState2, true);
-            this.L5CF0C6jx0T17H4I(this.NZkZx8MJ67Zw.XMj1R1A1);
-        } else if (((Boolean)MusheorSystem.Manager.doubleBreak.get()).booleanValue() && this.jIXFBaSwUWYqAc9 == null) {
-            this.jOdDDFXSeWl4(class_2846.class_2847.field_12973, this.NZkZx8MJ67Zw.XMj1R1A1);
-            BlockPos BlockPos3 = this.OIExXGL6BNv.pollFirst();
-            BlockState BlockState3 = KekMine.F41rraDXnaj.world.getBlockState(BlockPos3);
-            this.jIXFBaSwUWYqAc9 = new MineContext(this.NZkZx8MJ67Zw.XMj1R1A1, this.NZkZx8MJ67Zw.rpvWtoVonf6GeT, false);
-            this.NZkZx8MJ67Zw = new MineContext(BlockPos3, BlockState3, true);
-            this.L5CF0C6jx0T17H4I(this.NZkZx8MJ67Zw.XMj1R1A1);
+        if (this.primaryMine == null) {
+            BlockPos pos = this.miningQueue.pollFirst();
+            BlockState state = KekMine.mc.world.getBlockState(pos);
+            KekMine.swapToTool(pos, state);
+            this.primaryMine = new MineContext(pos, state, true);
+            this.sendBreakPacket(this.primaryMine.pos);
+        } else if (((Boolean)MusheorSystem.Manager.doubleBreak.get()).booleanValue() && this.secondaryMine == null) {
+            this.sendBlockAction(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, this.primaryMine.pos);
+            BlockPos pos2 = this.miningQueue.pollFirst();
+            BlockState state2 = KekMine.mc.world.getBlockState(pos2);
+            this.secondaryMine = new MineContext(this.primaryMine.pos, this.primaryMine.state, false);
+            this.primaryMine = new MineContext(pos2, state2, true);
+            this.sendBreakPacket(this.primaryMine.pos);
         }
     }
 
-    private void L5CF0C6jx0T17H4I(BlockPos BlockPos2) {
+    private void sendBreakPacket(BlockPos pos) {
         if (((Boolean)MusheorSystem.Manager.grimBypass.get()).booleanValue()) {
-            this.jOdDDFXSeWl4(class_2846.class_2847.field_12973, BlockPos2);
+            this.sendBlockAction(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos);
         }
-        this.jOdDDFXSeWl4(class_2846.class_2847.field_12968, BlockPos2);
+        this.sendBlockAction(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, pos);
     }
 
-    private void jOdDDFXSeWl4(MineContext mineContext, boolean bl) {
+    private void sendBreakWithSwap(MineContext mineContext, boolean bl) {
         int n;
         boolean bl2;
-        if (KekMine.F41rraDXnaj.world == null || KekMine.F41rraDXnaj.player == null) {
+        if (KekMine.mc.world == null || KekMine.mc.player == null) {
             return;
         }
-        int n2 = KekMine.F41rraDXnaj.player.getId().method_7395(InventoryManager.TAdu5cndwWu3A1(mineContext.rpvWtoVonf6GeT));
-        boolean bl3 = bl2 = n2 != (n = KekMine.F41rraDXnaj.player.getId().field_7545);
+        int n2 = KekMine.mc.player.getInventory().getSlotWithStack(InventoryManager.getBestToolForBlock(mineContext.state));
+        boolean bl3 = bl2 = n2 != (n = KekMine.mc.player.getInventory().selectedSlot);
         if (bl && bl2) {
-            this.vgrtgn5(n2);
+            this.sendSlotPacket(n2);
         }
-        this.jOdDDFXSeWl4(class_2846.class_2847.field_12973, mineContext.XMj1R1A1);
+        this.sendBlockAction(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, mineContext.pos);
         if (bl && bl2) {
-            this.vgrtgn5(n);
+            this.sendSlotPacket(n);
         }
     }
 
-    private void mp3zoXQFKUKYj5(MineContext mineContext, boolean bl) {
+    private void completeMining(MineContext mineContext, boolean bl) {
         int n;
-        if (KekMine.F41rraDXnaj.world == null || KekMine.F41rraDXnaj.player == null) {
+        if (KekMine.mc.world == null || KekMine.mc.player == null) {
             return;
         }
-        if (this.NZkZx8MJ67Zw != null) {
-            HighwayBuilder.jOdDDFXSeWl4(this.NZkZx8MJ67Zw.rpvWtoVonf6GeT);
+        if (this.primaryMine != null) {
+            HighwayBuilder.onBlockMined(this.primaryMine.state);
         }
-        if (this.jIXFBaSwUWYqAc9 != null) {
-            HighwayBuilder.jOdDDFXSeWl4(this.jIXFBaSwUWYqAc9.rpvWtoVonf6GeT);
+        if (this.secondaryMine != null) {
+            HighwayBuilder.onBlockMined(this.secondaryMine.state);
         }
-        int n2 = KekMine.F41rraDXnaj.player.getId().method_7395(InventoryManager.TAdu5cndwWu3A1(mineContext.rpvWtoVonf6GeT));
-        if (mineContext == this.jIXFBaSwUWYqAc9 && this.NZkZx8MJ67Zw != null && (n = KekMine.F41rraDXnaj.player.getId().method_7395(InventoryManager.TAdu5cndwWu3A1(this.NZkZx8MJ67Zw.rpvWtoVonf6GeT))) != n2) {
+        int n2 = KekMine.mc.player.getInventory().getSlotWithStack(InventoryManager.getBestToolForBlock(mineContext.state));
+        if (mineContext == this.secondaryMine && this.primaryMine != null && (n = KekMine.mc.player.getInventory().getSlotWithStack(InventoryManager.getBestToolForBlock(this.primaryMine.state))) != n2) {
             n2 = n;
         }
-        if (!mineContext.E74ay1CfIa1C1X6) {
+        if (!mineContext.canInstaBreak) {
             if (bl) {
-                InventoryManager.jOdDDFXSeWl4(n2, () -> this.jOdDDFXSeWl4(class_2846.class_2847.field_12973, mineContext.XMj1R1A1));
+                InventoryManager.withHotbarSlot(n2, () -> this.sendBlockAction(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, mineContext.pos));
             } else {
-                this.jOdDDFXSeWl4(class_2846.class_2847.field_12973, mineContext.XMj1R1A1);
+                this.sendBlockAction(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, mineContext.pos);
             }
         } else if (bl) {
-            InventoryManager.jOdDDFXSeWl4(n2, null);
+            InventoryManager.withHotbarSlot(n2, null);
         }
-        if ((mineContext.E74ay1CfIa1C1X6 || mineContext.yIXEDGFGtS9H) && !((Boolean)MusheorSystem.Manager.validateBreak.get()).booleanValue()) {
-            KekMine.F41rraDXnaj.world.method_20290(2001, mineContext.XMj1R1A1, Block.method_9507((BlockState)mineContext.rpvWtoVonf6GeT));
-            KekMine.F41rraDXnaj.world.method_8652(mineContext.XMj1R1A1, Blocks.LAVA.method_9564(), 3);
+        if ((mineContext.canInstaBreak || mineContext.isPrimary) && !((Boolean)MusheorSystem.Manager.validateBreak.get()).booleanValue()) {
+            KekMine.mc.world.syncWorldEvent(2001, mineContext.pos, Block.getRawIdFromState((BlockState)mineContext.state));
+            KekMine.mc.world.setBlockState(mineContext.pos, Blocks.AIR.getDefaultState(), 3);
         }
-        this.gsu3U1 = mineContext.XMj1R1A1;
-        mineContext.HBAiI3pyGGGxpI2b = false;
-        if (mineContext == this.NZkZx8MJ67Zw) {
-            this.NZkZx8MJ67Zw = null;
-        } else if (mineContext == this.jIXFBaSwUWYqAc9) {
-            this.jIXFBaSwUWYqAc9 = null;
+        this.lastBreakPos = mineContext.pos;
+        mineContext.active = false;
+        if (mineContext == this.primaryMine) {
+            this.primaryMine = null;
+        } else if (mineContext == this.secondaryMine) {
+            this.secondaryMine = null;
         }
     }
 
-    public void jOdDDFXSeWl4(class_2846.class_2847 class_28472, BlockPos BlockPos2) {
-        if (KekMine.F41rraDXnaj.field_1761 == null || KekMine.F41rraDXnaj.world == null) {
+    public void sendBlockAction(PlayerActionC2SPacket.Action actionType, BlockPos pos) {
+        if (KekMine.mc.interactionManager == null || KekMine.mc.world == null) {
             return;
         }
-        KekMine.F41rraDXnaj.field_1761.method_41931(KekMine.F41rraDXnaj.world, n -> new class_2846(class_28472, BlockPos2, Direction.field_11036, n));
+        KekMine.mc.interactionManager.sendSequencedPacket(KekMine.mc.world, n -> new PlayerActionC2SPacket(actionType, pos, Direction.UP, n));
     }
 
-    public void vgrtgn5(int n) {
-        if (KekMine.F41rraDXnaj.field_1761 == null || KekMine.F41rraDXnaj.world == null || n < 0) {
+    public void sendSlotPacket(int n) {
+        if (KekMine.mc.interactionManager == null || KekMine.mc.world == null || n < 0) {
             return;
         }
-        KekMine.F41rraDXnaj.field_1761.method_41931(KekMine.F41rraDXnaj.world, n2 -> new class_2868(n));
+        KekMine.mc.interactionManager.sendSequencedPacket(KekMine.mc.world, n2 -> new UpdateSelectedSlotC2SPacket(n));
     }
 
-    public boolean Y9BgxR(BlockPos BlockPos2) {
-        return !(KekMine.F41rraDXnaj.player.method_33571().method_1022(BlockPos2.method_46558()) <= (Double)((KekNuker)Modules.get().get(KekNuker.class)).range.get() + 0.5);
+    public boolean isOutOfRange(BlockPos pos) {
+        return !(KekMine.mc.player.getEyePos().distanceTo(pos.toCenterPos()) <= (Double)((KekNuker)Modules.get().get(KekNuker.class)).range.get() + 0.5);
     }
 
     @EventHandler
     private void onRender(Render3DEvent render3DEvent) {
-        if (KekMine.F41rraDXnaj.player == null || KekMine.F41rraDXnaj.world == null) {
+        if (KekMine.mc.player == null || KekMine.mc.world == null) {
             return;
         }
         if (!((KekNuker)Modules.get().get(KekNuker.class)).isActive()) {
             if (((Boolean)this.globalRendering.get()).booleanValue()) {
-                RenderUtils.mp3zoXQFKUKYj5(render3DEvent, this.OIExXGL6BNv.stream().toList());
+                RenderUtils.mp3zoXQFKUKYj5(render3DEvent, this.miningQueue.stream().toList());
             } else {
-                RenderUtils.jOdDDFXSeWl4(render3DEvent, this.OIExXGL6BNv.stream().toList(), meteordevelopment.meteorclient.utils.render.color.Color.WHITE, meteordevelopment.meteorclient.utils.render.color.Color.WHITE, ShapeMode.Lines);
+                RenderUtils.jOdDDFXSeWl4(render3DEvent, this.miningQueue.stream().toList(), meteordevelopment.meteorclient.utils.render.color.Color.WHITE, meteordevelopment.meteorclient.utils.render.color.Color.WHITE, ShapeMode.Lines);
             }
         }
-        if (this.jIXFBaSwUWYqAc9 != null) {
+        if (this.secondaryMine != null) {
             if (((Boolean)this.globalRendering.get()).booleanValue()) {
-                this.jOdDDFXSeWl4(render3DEvent, this.jIXFBaSwUWYqAc9, (meteordevelopment.meteorclient.utils.render.color.Color)MusheorSystem.Manager.renderSideColor.get(), (meteordevelopment.meteorclient.utils.render.color.Color)MusheorSystem.Manager.renderLineColor.get(), (ShapeMode)MusheorSystem.Manager.renderShape.get());
+                this.renderMineContext(render3DEvent, this.secondaryMine, (meteordevelopment.meteorclient.utils.render.color.Color)MusheorSystem.Manager.renderSideColor.get(), (meteordevelopment.meteorclient.utils.render.color.Color)MusheorSystem.Manager.renderLineColor.get(), (ShapeMode)MusheorSystem.Manager.renderShape.get());
             } else {
-                this.jOdDDFXSeWl4(render3DEvent, this.jIXFBaSwUWYqAc9, (meteordevelopment.meteorclient.utils.render.color.Color)this.renderColor.get(), (meteordevelopment.meteorclient.utils.render.color.Color)this.renderColor.get(), ShapeMode.Lines);
+                this.renderMineContext(render3DEvent, this.secondaryMine, (meteordevelopment.meteorclient.utils.render.color.Color)this.renderColor.get(), (meteordevelopment.meteorclient.utils.render.color.Color)this.renderColor.get(), ShapeMode.Lines);
             }
         }
-        if (this.NZkZx8MJ67Zw != null) {
+        if (this.primaryMine != null) {
             if (((Boolean)this.globalRendering.get()).booleanValue()) {
-                this.jOdDDFXSeWl4(render3DEvent, this.NZkZx8MJ67Zw, (meteordevelopment.meteorclient.utils.render.color.Color)MusheorSystem.Manager.renderSideColor.get(), (meteordevelopment.meteorclient.utils.render.color.Color)MusheorSystem.Manager.renderLineColor.get(), (ShapeMode)MusheorSystem.Manager.renderShape.get());
+                this.renderMineContext(render3DEvent, this.primaryMine, (meteordevelopment.meteorclient.utils.render.color.Color)MusheorSystem.Manager.renderSideColor.get(), (meteordevelopment.meteorclient.utils.render.color.Color)MusheorSystem.Manager.renderLineColor.get(), (ShapeMode)MusheorSystem.Manager.renderShape.get());
             } else {
-                this.jOdDDFXSeWl4(render3DEvent, this.NZkZx8MJ67Zw, (meteordevelopment.meteorclient.utils.render.color.Color)this.renderColor.get(), (meteordevelopment.meteorclient.utils.render.color.Color)this.renderColor.get(), ShapeMode.Lines);
+                this.renderMineContext(render3DEvent, this.primaryMine, (meteordevelopment.meteorclient.utils.render.color.Color)this.renderColor.get(), (meteordevelopment.meteorclient.utils.render.color.Color)this.renderColor.get(), ShapeMode.Lines);
             }
         }
-        if (this.gsu3U1 != null && ((Boolean)this.autoRebreak.get()).booleanValue() && !KekMine.F41rraDXnaj.world.getBlockState(this.gsu3U1).isAir()) {
+        if (this.lastBreakPos != null && ((Boolean)this.autoRebreak.get()).booleanValue() && !KekMine.mc.world.getBlockState(this.lastBreakPos).isAir()) {
             if (((Boolean)this.globalRendering.get()).booleanValue()) {
-                RenderUtils.jOdDDFXSeWl4(render3DEvent, this.gsu3U1, KekMine.F41rraDXnaj.world.getBlockState(this.gsu3U1).getBlock());
+                RenderUtils.jOdDDFXSeWl4(render3DEvent, this.lastBreakPos, KekMine.mc.world.getBlockState(this.lastBreakPos).getBlock());
             } else {
-                RenderUtils.jOdDDFXSeWl4(render3DEvent, this.gsu3U1, (meteordevelopment.meteorclient.utils.render.color.Color)this.renderColor.get(), (meteordevelopment.meteorclient.utils.render.color.Color)this.renderColor.get(), ShapeMode.Lines);
+                RenderUtils.jOdDDFXSeWl4(render3DEvent, this.lastBreakPos, (meteordevelopment.meteorclient.utils.render.color.Color)this.renderColor.get(), (meteordevelopment.meteorclient.utils.render.color.Color)this.renderColor.get(), ShapeMode.Lines);
             }
         }
     }
 
-    private void jOdDDFXSeWl4(Render3DEvent render3DEvent, MineContext mineContext, meteordevelopment.meteorclient.utils.render.color.Color color, meteordevelopment.meteorclient.utils.render.color.Color color2, ShapeMode shapeMode) {
-        double d = (1.0 - mineContext.xZ3kyYFbKEKAvqOe()) / 2.0;
-        class_238 class_2383 = new class_238((double)mineContext.XMj1R1A1.getX() + d, (double)mineContext.XMj1R1A1.getY() + d, (double)mineContext.XMj1R1A1.getZ() + d, (double)mineContext.XMj1R1A1.getX() + 1.0 - d, (double)mineContext.XMj1R1A1.getY() + 1.0 - d, (double)mineContext.XMj1R1A1.getZ() + 1.0 - d);
-        render3DEvent.renderer.box(class_2383, color, color2, shapeMode, 0);
+    private void renderMineContext(Render3DEvent render3DEvent, MineContext mineContext, meteordevelopment.meteorclient.utils.render.color.Color color, meteordevelopment.meteorclient.utils.render.color.Color color2, ShapeMode shapeMode) {
+        double d = (1.0 - mineContext.getBreakProgress()) / 2.0;
+        Box box = new Box((double)mineContext.pos.getX() + d, (double)mineContext.pos.getY() + d, (double)mineContext.pos.getZ() + d, (double)mineContext.pos.getX() + 1.0 - d, (double)mineContext.pos.getY() + 1.0 - d, (double)mineContext.pos.getZ() + 1.0 - d);
+        render3DEvent.renderer.box(box, color, color2, shapeMode, 0);
     }
 
     public static class MineContext {
-        public final BlockPos XMj1R1A1;
-        public final BlockState rpvWtoVonf6GeT;
-        public long Y775oeIufYz9;
-        public final float lzRYRnZcMXfWy6t;
-        public boolean HBAiI3pyGGGxpI2b = true;
-        public final boolean rUchPoPt;
-        public final boolean E74ay1CfIa1C1X6;
-        public final boolean yIXEDGFGtS9H;
-        public final MinecraftClient fjsJhTJB1Q6qDp4F = MinecraftClient.getInstance();
+        public final BlockPos pos;
+        public final BlockState state;
+        public long breakStartTime;
+        public final float hardness;
+        public boolean active = true;
+        public final boolean isAttack;
+        public final boolean canInstaBreak;
+        public final boolean isPrimary;
+        public final MinecraftClient mc = MinecraftClient.getInstance();
 
-        public MineContext(BlockPos BlockPos2, BlockState BlockState2, boolean bl) {
-            this.XMj1R1A1 = BlockPos2.mutableCopy();
-            this.rpvWtoVonf6GeT = BlockState2;
-            this.lzRYRnZcMXfWy6t = BlockState2.method_26214((class_1922)this.fjsJhTJB1Q6qDp4F.world, BlockPos2);
-            this.rUchPoPt = bl;
-            this.Y775oeIufYz9 = System.currentTimeMillis();
-            this.E74ay1CfIa1C1X6 = BlockUtils.canInstaBreak((BlockPos)BlockPos2);
-            this.yIXEDGFGtS9H = (double)this.w6yjUYq() / (Double)MusheorSystem.Manager.breakThreshold.get() >= 1.0;
+        public MineContext(BlockPos pos, BlockState state, boolean bl) {
+            this.pos = pos.toImmutable();
+            this.state = state;
+            this.hardness = state.getHardness((BlockView)this.mc.world, pos);
+            this.isAttack = bl;
+            this.breakStartTime = System.currentTimeMillis();
+            this.canInstaBreak = BlockUtils.canInstaBreak((BlockPos)pos);
+            this.isPrimary = (double)this.getBreakSpeed() / (Double)MusheorSystem.Manager.breakThreshold.get() >= 1.0;
         }
 
-        private float w6yjUYq() {
+        private float getBreakSpeed() {
             float f;
-            float f2 = this.rpvWtoVonf6GeT.method_26214((class_1922)this.fjsJhTJB1Q6qDp4F.world, this.XMj1R1A1);
-            ItemStack ItemStack2 = InventoryManager.TAdu5cndwWu3A1(this.rpvWtoVonf6GeT);
-            int n = !this.rpvWtoVonf6GeT.method_29291() || ItemStack2.method_7951(this.rpvWtoVonf6GeT) ? 30 : 100;
-            float f3 = this.fjsJhTJB1Q6qDp4F.player.method_7351(this.rpvWtoVonf6GeT);
-            if (ItemStack2 != null && !ItemStack2.setStack() && (f = ItemStack2.method_7924(this.rpvWtoVonf6GeT)) > 1.0f) {
+            float f2 = this.state.getHardness((BlockView)this.mc.world, this.pos);
+            ItemStack ItemStack2 = InventoryManager.getBestToolForBlock(this.state);
+            int n = !this.state.isToolRequired() || ItemStack2.isSuitableFor(this.state) ? 30 : 100;
+            float f3 = this.mc.player.getBlockBreakingSpeed(this.state);
+            if (ItemStack2 != null && !ItemStack2.isEmpty() && (f = ItemStack2.getMiningSpeedMultiplier(this.state)) > 1.0f) {
                 f3 = f;
-                int n2 = Utils.getEnchantmentLevel((ItemStack)ItemStack2, (class_5321)class_1893.field_9131);
-                if (n2 > 0 && !ItemStack2.setStack()) {
+                int n2 = Utils.getEnchantmentLevel((ItemStack)ItemStack2, (RegistryKey)Enchantments.EFFICIENCY);
+                if (n2 > 0 && !ItemStack2.isEmpty()) {
                     f3 += (float)(n2 * n2 + 1);
                 }
             }
-            if (class_1292.method_5576((LivingEntity)this.fjsJhTJB1Q6qDp4F.player)) {
-                f3 *= 1.0f + (float)(class_1292.method_5575((LivingEntity)this.fjsJhTJB1Q6qDp4F.player) + 1) * 0.2f;
+            if (StatusEffectUtil.hasHaste((LivingEntity)this.mc.player)) {
+                f3 *= 1.0f + (float)(StatusEffectUtil.getHasteAmplifier((LivingEntity)this.mc.player) + 1) * 0.2f;
             }
-            if (this.fjsJhTJB1Q6qDp4F.player.method_6059(Hand.field_5901)) {
-                f = switch (this.fjsJhTJB1Q6qDp4F.player.method_6112(Hand.field_5901).method_5578()) {
+            if (this.mc.player.hasStatusEffect(StatusEffects.MINING_FATIGUE)) {
+                f = switch (this.mc.player.getStatusEffect(StatusEffects.MINING_FATIGUE).getAmplifier()) {
                     case 0 -> 0.3f;
                     case 1 -> 0.09f;
                     case 2 -> 0.0027f;
@@ -372,28 +372,27 @@ extends Module {
                 };
                 f3 *= f;
             }
-            if (this.fjsJhTJB1Q6qDp4F.player.method_5777(class_3486.field_15517)) {
-                f3 *= (float)this.fjsJhTJB1Q6qDp4F.player.method_45325(class_5134.field_51576);
+            if (this.mc.player.isSubmergedIn(FluidTags.WATER)) {
+                f3 *= (float)this.mc.player.getAttributeValue(EntityAttributes.SUBMERGED_MINING_SPEED);
             }
-            if (!this.fjsJhTJB1Q6qDp4F.player.method_24828()) {
+            if (!this.mc.player.isOnGround()) {
                 f3 /= 5.0f;
             }
             return f3 / f2 / (float)n;
         }
 
-        double xZ3kyYFbKEKAvqOe() {
-            if (this.fjsJhTJB1Q6qDp4F.player == null || this.fjsJhTJB1Q6qDp4F.world == null || this.lzRYRnZcMXfWy6t < 0.0f) {
+        double getBreakProgress() {
+            if (this.mc.player == null || this.mc.world == null || this.hardness < 0.0f) {
                 return 0.0;
             }
-            float f = this.w6yjUYq();
+            float f = this.getBreakSpeed();
             if (f <= 0.0f) {
                 return 2.147483647E9;
             }
-            float f2 = Math.max((float)(System.currentTimeMillis() - this.Y775oeIufYz9) / 50.0f + 1.0f, 1.0f);
+            float f2 = Math.max((float)(System.currentTimeMillis() - this.breakStartTime) / 50.0f + 1.0f, 1.0f);
             float f3 = f * f2;
-            float f4 = this.rUchPoPt ? ((Double)MusheorSystem.Manager.breakThreshold.get()).floatValue() : 1.0f;
+            float f4 = this.isAttack ? ((Double)MusheorSystem.Manager.breakThreshold.get()).floatValue() : 1.0f;
             return Math.min((double)(f3 / f4), 1.0);
         }
     }
 }
-

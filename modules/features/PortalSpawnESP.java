@@ -18,16 +18,16 @@ import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
 import musheor.musheor;
-import net.minecraft.class_1922;
-import net.minecraft.BlockPos;
-import net.minecraft.Direction;
-import net.minecraft.Heightmap;
-import net.minecraft.class_638;
+import net.minecraft.client.world.ClientWorld;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
+import net.minecraft.world.BlockView;
+import net.minecraft.world.Heightmap;
 
 public class PortalSpawnESP
 extends Module {
-    private final AtomicBoolean cHJtj8k = new AtomicBoolean(false);
-    private final List<BlockPos> douPMO = new CopyOnWriteArrayList<BlockPos>();
+    private final AtomicBoolean scanning = new AtomicBoolean(false);
+    private final List<BlockPos> validPositions = new CopyOnWriteArrayList<BlockPos>();
     public final Setting<BlockPos> target = this.settings.getDefaultGroup().add((Setting)((BlockPosSetting.Builder)((BlockPosSetting.Builder)((BlockPosSetting.Builder)new BlockPosSetting.Builder().name("Target Position")).description("Block position to look around for possible / valid portal spawn locations.")).defaultValue((Object)new BlockPos(0, 0, 0))).build());
     private final Setting<Integer> radius = this.settings.getDefaultGroup().add((Setting)((IntSetting.Builder)((IntSetting.Builder)((IntSetting.Builder)new IntSetting.Builder().name("radius")).description("The range at which portal locations are scanned and rendered.")).sliderRange(8, 128).defaultValue((Object)32)).build());
     private final Setting<ShapeMode> shape = this.settings.getDefaultGroup().add((Setting)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)new EnumSetting.Builder().name("shape")).description("How the blocks scheduled for placement are rendered.")).defaultValue((Object)ShapeMode.Both)).build());
@@ -39,60 +39,60 @@ extends Module {
     }
 
     public void onDeactivate() {
-        this.douPMO.clear();
-        this.cHJtj8k.set(false);
+        this.validPositions.clear();
+        this.scanning.set(false);
     }
 
     @EventHandler
     private void onTick(TickEvent.Post post) {
         if (this.mc.player == null || this.mc.world == null) {
-            this.douPMO.clear();
-            this.cHJtj8k.set(false);
+            this.validPositions.clear();
+            this.scanning.set(false);
             return;
         }
-        if (this.cHJtj8k.compareAndSet(false, true)) {
-            new Thread(this::DjHFvVBXZHN0k, "PortalScanThread").start();
+        if (this.scanning.compareAndSet(false, true)) {
+            new Thread(this::runScan, "PortalScanThread").start();
         }
     }
 
-    private void DjHFvVBXZHN0k() {
-        class_638 class_6382 = this.mc.world;
-        assert (this.mc.player != null && class_6382 != null);
-        BlockPos BlockPos2 = (BlockPos)this.target.get();
+    private void runScan() {
+        ClientWorld world = this.mc.world;
+        assert (this.mc.player != null && world != null);
+        BlockPos center = (BlockPos)this.target.get();
         int n = (Integer)this.radius.get();
-        int n2 = class_6382.getBottomY();
-        ArrayList<BlockPos> arrayList = new ArrayList<BlockPos>();
-        block0: for (BlockPos.class_2339 class_23392 : BlockPos.method_30512((BlockPos)BlockPos2, (int)n, (Direction)Direction.field_11034, (Direction)Direction.field_11035)) {
+        int bottomY = world.getBottomY();
+        ArrayList<BlockPos> found = new ArrayList<BlockPos>();
+        block0: for (BlockPos.Mutable mutable : BlockPos.iterateInSquare((BlockPos)center, (int)n, (Direction)Direction.EAST, (Direction)Direction.SOUTH)) {
             int n3;
-            int n4 = class_23392.getX();
-            int n5 = class_23392.getZ();
-            int n6 = class_6382.getTopY(Heightmap.class_2903.WORLD_SURFACE, n4, n5);
-            for (int i = n3 = Math.min(n6, BlockPos2.getY() + n); i >= n2; --i) {
-                class_23392.method_10103(n4, i, n5);
-                if (!this.jOdDDFXSeWl4(class_23392)) continue;
-                arrayList.add(class_23392.mutableCopy());
+            int x = mutable.getX();
+            int z = mutable.getZ();
+            int topY = world.getTopY(Heightmap.Type.WORLD_SURFACE, x, z);
+            for (int i = n3 = Math.min(topY, center.getY() + n); i >= bottomY; --i) {
+                mutable.set(x, i, z);
+                if (!this.isValidPortalSpawn(mutable)) continue;
+                found.add(mutable.toImmutable());
                 continue block0;
             }
         }
-        this.douPMO.clear();
-        this.douPMO.addAll(arrayList);
-        this.cHJtj8k.set(false);
+        this.validPositions.clear();
+        this.validPositions.addAll(found);
+        this.scanning.set(false);
     }
 
-    private boolean jOdDDFXSeWl4(BlockPos.class_2339 class_23392) {
-        ArrayList<Object> arrayList = new ArrayList<Object>();
-        arrayList.add(class_23392);
-        arrayList.add(class_23392.method_10079(Direction.field_11043, 1));
-        arrayList.add(class_23392.method_10079(Direction.field_11043, 2));
-        arrayList.add(class_23392.method_10079(Direction.field_11043, 3));
-        for (BlockPos BlockPos2 : arrayList) {
+    private boolean isValidPortalSpawn(BlockPos.Mutable mutable) {
+        ArrayList<BlockPos> footprint = new ArrayList<BlockPos>();
+        footprint.add(mutable.toImmutable());
+        footprint.add(mutable.offset(Direction.NORTH, 1));
+        footprint.add(mutable.offset(Direction.NORTH, 2));
+        footprint.add(mutable.offset(Direction.NORTH, 3));
+        for (BlockPos pos : footprint) {
             assert (this.mc.world != null);
-            if (this.mc.world.getBlockState(BlockPos2).method_26206((class_1922)this.mc.world, BlockPos2, Direction.field_11036)) continue;
+            if (this.mc.world.getBlockState(pos).isSideSolidFullSquare((BlockView)this.mc.world, pos, Direction.UP)) continue;
             return false;
         }
-        for (BlockPos BlockPos2 : arrayList) {
+        for (BlockPos pos : footprint) {
             for (int i = 1; i < 5; ++i) {
-                if (this.mc.world.getBlockState(BlockPos2.method_10086(i)).isAir()) continue;
+                if (this.mc.world.getBlockState(pos.up(i)).isAir()) continue;
                 return false;
             }
         }
@@ -101,9 +101,9 @@ extends Module {
 
     @EventHandler
     private void onRender(Render3DEvent render3DEvent) {
-        for (BlockPos BlockPos2 : this.douPMO) {
+        for (BlockPos BlockPos2 : this.validPositions) {
             for (int i = 0; i < 5; ++i) {
-                render3DEvent.renderer.box(BlockPos2.method_10079(Direction.field_11043, i), (Color)this.sideColor.get(), (Color)this.lineColor.get(), (ShapeMode)this.shape.get(), 0);
+                render3DEvent.renderer.box(BlockPos2.offset(Direction.NORTH, i), (Color)this.sideColor.get(), (Color)this.lineColor.get(), (ShapeMode)this.shape.get(), 0); // was: method_10079(Direction.field_11043, i)
             }
         }
     }

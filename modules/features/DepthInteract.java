@@ -8,22 +8,21 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.orbit.EventHandler;
 import musheor.musheor;
-import net.minecraft.BlockPos;
-import net.minecraft.PlayerAbilities;
-import net.minecraft.Vec3d;
-import net.minecraft.BlockEntity;
-import net.minecraft.class_2595;
-import net.minecraft.class_2611;
-import net.minecraft.class_2627;
-import net.minecraft.class_2646;
-import net.minecraft.MinecraftClient;
-import net.minecraft.class_3719;
+import net.minecraft.block.entity.BarrelBlockEntity;
+import net.minecraft.block.entity.BlockEntity;
+import net.minecraft.block.entity.ChestBlockEntity;
+import net.minecraft.block.entity.EnderChestBlockEntity;
+import net.minecraft.block.entity.ShulkerBoxBlockEntity;
+import net.minecraft.block.entity.TrappedChestBlockEntity;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Vec3d;
 
 public class DepthInteract
 extends Module {
     public static DepthInteract INSTANCE;
-    private final MinecraftClient RqrnBAk2kmqEg = MinecraftClient.getInstance();
-    public BlockPos mcAmeo = null;
+    private final MinecraftClient mc = MinecraftClient.getInstance();
+    public BlockPos targetPos = null;
 
     public DepthInteract() {
         super(musheor.MAIN, "depth-interact", "Interact with containers through blocks.");
@@ -31,40 +30,40 @@ extends Module {
     }
 
     public void onDeactivate() {
-        this.mcAmeo = null;
+        this.targetPos = null;
     }
 
     @EventHandler
     private void onTick(TickEvent.Post post) {
-        if (this.RqrnBAk2kmqEg.player == null || this.RqrnBAk2kmqEg.world == null) {
+        if (this.mc.player == null || this.mc.world == null) {
             return;
         }
-        this.mcAmeo = this.UgB10d(this.RqrnBAk2kmqEg.player.method_55754());
+        this.targetPos = this.findInteractableContainer(this.mc.player.getBlockInteractionRange());
     }
 
-    private BlockPos UgB10d(double d) {
-        Vec3d Vec3d2 = this.RqrnBAk2kmqEg.player.method_5836(1.0f);
-        Vec3d Vec3d3 = this.RqrnBAk2kmqEg.player.method_5828(1.0f);
+    private BlockPos findInteractableContainer(double d) {
+        Vec3d rotationVec = this.mc.player.getRotationVec(1.0f);
+        Vec3d cameraPos = this.mc.player.getCameraPosVec(1.0f);
         for (double d2 = 0.0; d2 <= d; d2 += 0.1) {
-            BlockEntity BlockEntity2;
-            Vec3d Vec3d4 = Vec3d2.method_1019(Vec3d3.method_1021(d2));
-            BlockPos BlockPos2 = BlockPos.method_49638((PlayerAbilities)Vec3d4);
-            if (!this.RqrnBAk2kmqEg.world.method_22340(BlockPos2) || !this.jOdDDFXSeWl4(BlockEntity2 = this.RqrnBAk2kmqEg.world.method_8321(BlockPos2))) continue;
-            return BlockPos2;
+            BlockEntity blockEntity;
+            Vec3d pos = cameraPos.add(rotationVec.multiply(d2));
+            BlockPos blockPos = BlockPos.ofFloored(pos);
+            if (!this.mc.world.isChunkLoaded(blockPos) || !this.isInteractableContainer(blockEntity = this.mc.world.getBlockEntity(blockPos))) continue;
+            return blockPos;
         }
         return null;
     }
 
-    private boolean jOdDDFXSeWl4(BlockEntity BlockEntity2) {
-        return BlockEntity2 instanceof class_2595 || BlockEntity2 instanceof class_2646 || BlockEntity2 instanceof class_3719 || BlockEntity2 instanceof class_2627 || BlockEntity2 instanceof class_2611;
+    private boolean isInteractableContainer(BlockEntity blockEntity) {
+        return blockEntity instanceof ChestBlockEntity || blockEntity instanceof TrappedChestBlockEntity || blockEntity instanceof BarrelBlockEntity || blockEntity instanceof ShulkerBoxBlockEntity || blockEntity instanceof EnderChestBlockEntity;
     }
 
     @EventHandler
     private void onRender(Render3DEvent render3DEvent) {
-        if (this.mcAmeo == null || this.RqrnBAk2kmqEg.world == null) {
+        if (this.targetPos == null || this.mc.world == null) {
             return;
         }
-        render3DEvent.renderer.box(this.mcAmeo, Color.CYAN, Color.CYAN, ShapeMode.Lines, 0);
+        render3DEvent.renderer.box(this.targetPos, Color.CYAN, Color.CYAN, ShapeMode.Lines, 0);
     }
 }
 

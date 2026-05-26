@@ -22,22 +22,22 @@ import musheor.compat.XearoHelper;
 import musheor.modules.features.CoordHider;
 import musheor.musheor;
 import musheor.utils.system.MusheorSystem;
-import net.minecraft.text.Formatting;            // class_124
-import net.minecraft.entity.Entity;              // class_1297
-import net.minecraft.entity.player.PlayerEntity; // class_1657
-import net.minecraft.entity.LivingEntity;        // class_1684
-import net.minecraft.world.chunk.WorldChunk;     // class_2818
-import net.minecraft.util.math.ChunkPos;         // class_1923
-import net.minecraft.world.dimension.DimensionType; // class_1937
+import net.minecraft.text.Formatting;
+import net.minecraft.entity.Entity;  
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.entity.LivingEntity;
+import net.minecraft.world.chunk.WorldChunk;
+import net.minecraft.util.math.ChunkPos;
+import net.minecraft.world.dimension.DimensionType;
 import net.minecraft.block.Blocks;               // Blocks
 import net.minecraft.util.math.BlockPos;         // BlockPos
-import net.minecraft.block.entity.BlockEntity;   // class_2586
-import net.minecraft.block.entity.BlockEntityType; // class_2591
-import net.minecraft.block.entity.CommandBlockBlockEntity; // class_2643
-import net.minecraft.sound.SoundEvents;          // class_3417
-import net.minecraft.sound.SoundCategory;        // class_3419
-import net.minecraft.util.registry.Registry;     // class_7923
-import net.minecraft.util.math.Vec3d;            // class_243
+import net.minecraft.block.entity.BlockEntity;
+import net.minecraft.block.entity.BlockEntityType;
+import net.minecraft.block.entity.CommandBlockBlockEntity;
+import net.minecraft.sound.SoundEvents;
+import net.minecraft.sound.SoundCategory;
+import net.minecraft.util.registry.Registry;
+import net.minecraft.util.math.Vec3d;
 
 /**
  * Dispatcher: records events (player enter/leave visual range, stash detection,

@@ -22,15 +22,14 @@ import musheor.compat.VersionHelper;
 import musheor.musheor;
 import musheor.utils.InventoryManager;
 import musheor.utils.internal.PathingHelper;
-import net.minecraft.class_1268;   // Hand
-import net.minecraft.class_1297;   // Entity
-import net.minecraft.class_1299;   // EntityType
-import net.minecraft.class_1429;   // AnimalEntity
-import net.minecraft.ItemStack;   // ItemStack
-import net.minecraft.class_2596;   // Packet
-import net.minecraft.class_2824;   // PlayerInteractEntityC2SPacket
-import net.minecraft.class_2886;   // PlayerMoveC2SPacket (look)
-import net.minecraft.MinecraftClient;    // MinecraftClient
+import net.minecraft.util.Hand;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityType;
+import net.minecraft.entity.passive.AnimalEntity;
+import net.minecraft.network.packet.c2s.play.PlayerInteractEntityC2SPacket;
+import net.minecraft.network.packet.c2s.play.PlayerInteractItemC2SPacket;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.item.ItemStack;
 
 /**
  * Automatically breeds the selected animal types.
@@ -43,14 +42,14 @@ import net.minecraft.MinecraftClient;    // MinecraftClient
  *   5. If out of range, paths to the animal via Baritone
  */
 public class AutoBreeder extends Module {
-    private final MinecraftClient mc = MinecraftClient.method_1551(); // was: BX92A0OIIvD9
+    private final MinecraftClient mc = MinecraftClient.getInstance(); // was: BX92A0OIIvD9
     private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
 
-    private final Setting<Set<class_1299<?>>> entities = this.sgGeneral.add(
+    private final Setting<Set<EntityType<?>>> entities = this.sgGeneral.add(
         new EntityTypeListSetting.Builder()
             .name("entities")
             .description("Specific entities to breed.")
-            .defaultValue(new class_1299[0])
+            .defaultValue(new EntityType[0])
             .onlyAttackable()
             .build());
 
@@ -84,37 +83,37 @@ public class AutoBreeder extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre pre) {
-        if (this.mc.field_1724 == null || this.mc.field_1687 == null) return;
+        if (this.mc.player == null || this.mc.world == null) return;
 
         long now = System.currentTimeMillis();
         // Remove breed entries older than 5 minutes
         this.breedCooldowns.entrySet().removeIf(e -> now - e.getValue() >= 300_000L);
 
         // Collect candidate animals
-        ArrayList<class_1429> candidates = new ArrayList<class_1429>();
-        for (class_1297 entity : this.mc.world.method_18112()) { // getEntities()
-            if (!(entity instanceof class_1429)) continue;
-            class_1429 animal = (class_1429) entity;
-            if (!((Set<?>) this.entities.get()).contains(animal.method_5864())) continue; // getType()
-            if (this.breedCooldowns.containsKey(animal.method_5667())) continue;          // getUuid()
-            if (animal.method_6109()) continue;                                             // isBaby()
-            if (!animal.method_6481(this.mc.player.method_6047())) continue;          // isBreedingItem(mainHand)
-            if (!PlayerUtils.isWithin((class_1297) animal, (double) ((Double) this.distance.get()))) continue;
+        ArrayList<AnimalEntity> candidates = new ArrayList<AnimalEntity>();
+        for (Entity entity : this.mc.world.getEntities()) {
+            if (!(entity instanceof AnimalEntity)) continue;
+            AnimalEntity animal = (AnimalEntity) entity;
+            if (!((Set<?>) this.entities.get()).contains(animal.getType())) continue;
+            if (this.breedCooldowns.containsKey(animal.getUuid())) continue;
+            if (animal.isBaby()) continue;
+            if (!animal.isBreedingItem(this.mc.player.getMainHandStack())) continue;
+            if (!PlayerUtils.isWithin((Entity) animal, (double) ((Double) this.distance.get()))) continue;
             candidates.add(animal);
         }
-        candidates.sort(Comparator.comparingDouble(a -> a.method_5858((class_1297) this.mc.field_1724))); // squaredDistanceTo
+        candidates.sort(Comparator.comparingDouble(a -> a.squaredDistanceTo((Entity) this.mc.player)));
 
         if (!candidates.isEmpty()) {
-            class_1429 nearest = candidates.getFirst();
+            AnimalEntity nearest = candidates.getFirst();
 
             // If the animal can't be fed with the current main-hand item, find the right food
-            if (!nearest.method_6481(this.mc.player.method_6047())) {
-                for (int i = 0; i < this.mc.player.getId().field_7547.size(); ++i) {
-                    ItemStack stack = this.mc.player.getId().method_5438(i);
-                    if (nearest.method_6481(stack) && i < 8) {
-                        this.mc.player.getId().field_7545 = i; // selectedSlot
-                    } else if (nearest.method_6481(stack)) {
-                        InventoryManager.equipItem(stack.getStack()); // was: UgB10d(Item)
+            if (!nearest.isBreedingItem(this.mc.player.getMainHandStack())) {
+                for (int i = 0; i < this.mc.player.getInventory().main.size(); ++i) {
+                    ItemStack stack = this.mc.player.getInventory().getStack(i);
+                    if (nearest.isBreedingItem(stack) && i < 8) {
+                        this.mc.player.getInventory().selectedSlot = i;
+                    } else if (nearest.isBreedingItem(stack)) {
+                        InventoryManager.equipItem(stack.getItem());
                     } else {
                         this.info("No breeding items found in inventory, disabling...", new Object[0]);
                         this.toggle();
@@ -125,22 +124,23 @@ public class AutoBreeder extends Module {
             }
 
             // Attempt to interact if within range, otherwise path toward the animal
-            if (nearest.method_24516((class_1297) this.mc.field_1724, 2.5)) { // isWithinInteractionRange
+            if (nearest.isInRange((Entity) this.mc.player, 2.5)) {
                 PathingHelper.stopPathing();
                 this.currentTargetUuid = null;
-                float yaw   = (float) Rotations.getYaw((class_1297) nearest);
-                float pitch = (float) Rotations.getPitch((class_1297) nearest);
+                float yaw   = (float) Rotations.getYaw((Entity) nearest);
+                float pitch = (float) Rotations.getPitch((Entity) nearest);
                 Rotations.rotate((double) yaw, (double) pitch);
-                this.mc.field_1761.method_41931(this.mc.field_1687, n -> new class_2886(class_1268.field_5808, n, yaw, pitch)); // PlayerMoveC2SPacket look
-                VersionHelper.get().interactEntityAt(nearest, class_1268.field_5808);
-                this.mc.field_1761.method_41931(this.mc.field_1687,
-                    n -> class_2824.method_34207((class_1297) nearest, false, class_1268.field_5808)); // UseEntityPacket
-                this.breedCooldowns.put(nearest.method_5667(), System.currentTimeMillis());
+                // Send PlayerInteractItemC2SPacket (includes yaw/pitch for server-side validation in 1.21)
+                this.mc.interactionManager.sendSequencedPacket(this.mc.world, n -> new PlayerInteractItemC2SPacket(Hand.MAIN_HAND, n, yaw, pitch));
+                VersionHelper.get().interactEntityAt(nearest, Hand.MAIN_HAND);
+                this.mc.interactionManager.sendSequencedPacket(this.mc.world,
+                    n -> PlayerInteractEntityC2SPacket.interact((Entity) nearest, false, Hand.MAIN_HAND));
+                this.breedCooldowns.put(nearest.getUuid(), System.currentTimeMillis());
             } else {
-                UUID uid = nearest.method_5667();
+                UUID uid = nearest.getUuid();
                 if (!uid.equals(this.currentTargetUuid) || !PathingHelper.isAlreadyPathing()) {
                     this.currentTargetUuid = uid;
-                    PathingHelper.setBaritoneGoal((Goal) new GoalBlock(nearest.getBlockPos())); // getBlockPos()
+                    PathingHelper.setBaritoneGoal((Goal) new GoalBlock(nearest.getBlockPos()));
                 }
             }
         }

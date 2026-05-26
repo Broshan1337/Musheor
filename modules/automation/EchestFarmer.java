@@ -22,16 +22,15 @@ import musheor.utils.RenderUtils;
 import musheor.utils.WorldUtils;
 import musheor.utils.internal.HighwayState;
 import musheor.utils.system.MusheorSystem;
-import net.minecraft.class_1268;   // Hand
-import net.minecraft.ItemStack;   // Item
-import net.minecraft.Items;   // Items
-import net.minecraft.Blocks;   // Blocks
-import net.minecraft.BlockPos;   // BlockPos
-import net.minecraft.Direction;   // Direction
-import net.minecraft.class_2382;   // Vec3i
-import net.minecraft.class_243;    // Vec3d
-import net.minecraft.class_2846;   // PlayerActionC2SPacket
-import net.minecraft.Screen;   // BlockHitResult
+import net.minecraft.block.Blocks;
+import net.minecraft.item.Item;
+import net.minecraft.item.Items;
+import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
+import net.minecraft.util.Hand;
+import net.minecraft.util.hit.BlockHitResult;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
 
 /**
  * Farms ender chests by placing them and immediately mining them for obsidian.
@@ -107,93 +106,92 @@ public class EchestFarmer extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Pre pre) {
-        if (this.mc.field_1724 == null || this.mc.field_1687 == null) return;
-        HighwayState state = HighwayState.getInstance(); // was: LmpuWjra
+        if (this.mc.player == null || this.mc.world == null) return;
+        HighwayState state = HighwayState.getInstance();
 
-        WorldUtils.isScreenOpen(); // was: btLCQHvKVR (side effect: checks screen state)
+        WorldUtils.checkForLag();
 
-        if (HighwayBuilder.isEating() || HighwayBuilder.isWaiting() || SourceRemover.isActive()) return;
+        if (HighwayBuilder.isEating() || HighwayBuilder.isAttacking() || SourceRemover.fXEQFU()) return;
 
         // --- First tick: determine the placement position ---
         if (!this.posInitialised) {
-            this.sessionStartPos = this.mc.player.getBlockPos(); // getBlockPos()
-            // Place relative to direction if in HighwayBuilder, otherwise look direction
+            this.sessionStartPos = this.mc.player.getBlockPos();
             if (((HighwayBuilder) Modules.get().get(HighwayBuilder.class)).isActive()) {
-                echestPos = WorldUtils.getBlockInFront(HighwayBuilder.getDirection()); // was: jOdDDFXSeWl4(Direction8)
+                echestPos = WorldUtils.getOffset2AheadPos(HighwayBuilder.getDirection());
             } else {
-                echestPos = WorldUtils.getBlockInFront(WorldUtils.getPlayerFacing().toOppositeDirection()); // was: eQlnaotm4pUDUmJT().gkoa4kDDOuwRuB64()
+                echestPos = WorldUtils.getOffset2AheadPos(WorldUtils.getPlayerFacing().opposite());
             }
             this.posInitialised = true;
             return;
         }
 
-        boolean isAir    = this.mc.world.getBlockState(echestPos).getBlock() == Blocks.field_10443; // Blocks.AIR
-        boolean isLiquid = this.mc.world.getBlockState(echestPos).method_45474(); // isAir (double-check)
+        boolean isEnderChest = this.mc.world.getBlockState(echestPos).getBlock() == Blocks.ENDER_CHEST;
+        boolean isAir        = this.mc.world.getBlockState(echestPos).isAir();
 
-        // --- Stop condition: farmed enough or inventory full ---
+        // --- Stop condition: farmed enough or no pickaxes left ---
         if (((Boolean) this.selfToggle.get()) && this.farmedCount >= (Integer) this.amount.get()
-                || InventoryManager.countPickaxes(false) == 0) { // was: VYEwzRq(false)
+                || InventoryManager.countPickaxes(false) == 0) {
             MusheorSystem.debug("Mining last enderchest...", new Object[0]);
-            if (isAir) {
-                InventoryManager.equipBestTool(false); // was: vgrtgn5(false)
+            if (isEnderChest) {
+                InventoryManager.equipBestPickaxe(false);
                 if (KekMine.INSTANCE.isActive()) {
-                    KekMine.INSTANCE.startBreak(echestPos, this.mc.world.getBlockState(echestPos)); // was: TAdu5cndwWu3A1
+                    KekMine.INSTANCE.queueBlock(echestPos, this.mc.world.getBlockState(echestPos));
                 } else {
                     BlockUtils.breakBlock((BlockPos) echestPos, true);
                 }
                 return;
             }
-            if (isLiquid) {
-                state.setAutoWalkEnabled(false); // was: MS1x7YGHjIg7eB(false)
+            if (isAir) {
+                state.setResupplyActive(false);
                 this.toggle();
             }
             return;
         }
 
-        // Ensure obsidian is in hotbar
-        FindItemResult obsidian = InvUtils.findInHotbar(new ItemStack[]{Items.field_8466}); // OBSIDIAN
-        if (!obsidian.found()) {
-            if (InventoryManager.countItem(Items.field_8466) < 8) { // was: usJLOV0subXO3
-                state.setAutoWalkEnabled(false);
+        // --- Ensure ender chest is in hotbar ---
+        FindItemResult echestResult = InvUtils.findInHotbar(new Item[]{Items.ENDER_CHEST});
+        if (!echestResult.found()) {
+            if (InventoryManager.countItemInInventory(Items.ENDER_CHEST) < 8) {
+                state.setResupplyActive(false);
                 this.toggle();
                 return;
             }
-            InventoryManager.equipItem(Items.field_8466); // was: UgB10d
+            InventoryManager.moveItemToHotbar(Items.ENDER_CHEST);
             return;
         }
 
         // --- Super-farm mode ---
         if (((Boolean) this.superFarm.get())) {
             if (this.farmedCount < 4) {
-                if (isLiquid && !this.lastBreakWasSuccessful) {
+                if (isAir && !this.lastBreakWasSuccessful) {
                     placeEnderChest();
                     this.lastBreakWasSuccessful = true;
-                } else if (isAir) {
+                } else if (isEnderChest) {
                     if (KekMine.INSTANCE.isActive()) {
-                        KekMine.INSTANCE.startBreak(echestPos, this.mc.world.getBlockState(echestPos));
+                        KekMine.INSTANCE.queueBlock(echestPos, this.mc.world.getBlockState(echestPos));
                     } else {
                         BlockUtils.breakBlock((BlockPos) echestPos, true);
                     }
                     this.lastBreakWasSuccessful = false;
                 }
             } else {
-                if (isLiquid) placeEnderChest();
-                InventoryManager.equipBestTool(false);
-                KekMine.INSTANCE.startBreakAction(class_2846.class_2847.field_12973, echestPos); // was: jOdDDFXSeWl4(PlayerAction,BlockPos)
+                if (isAir) placeEnderChest();
+                InventoryManager.equipBestPickaxe(false);
+                KekMine.INSTANCE.sendBlockAction(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, echestPos);
             }
         } else {
             // Normal mode: break then place
-            if (isAir) {
-                InventoryManager.equipBestTool(false);
+            if (isEnderChest) {
+                InventoryManager.equipBestPickaxe(false);
                 if (KekMine.INSTANCE.isActive()) {
-                    KekMine.INSTANCE.startBreak(echestPos, this.mc.world.getBlockState(echestPos));
+                    KekMine.INSTANCE.queueBlock(echestPos, this.mc.world.getBlockState(echestPos));
                 } else {
                     BlockUtils.breakBlock((BlockPos) echestPos, true);
                 }
                 this.lastBreakWasSuccessful = false;
                 return;
             }
-            if (isLiquid && !this.lastBreakWasSuccessful) {
+            if (isAir && !this.lastBreakWasSuccessful) {
                 placeEnderChest();
                 this.lastBreakWasSuccessful = true;
             }
@@ -205,11 +203,11 @@ public class EchestFarmer extends Module {
      * then increments the counter.
      */
     private void placeEnderChest() { // was: CEOjBr5G5R
-        InventoryManager.equipItem(Items.field_8466); // obsidian to main hand
-        WorldUtils.highlightBlock(echestPos); // was: MS1x7YGHjIg7eB (render)
-        WorldUtils.swapCarriedItems(); // was: l3ot1CwoJ9CsS
-        WorldUtils.placeBlock(class_1268.field_5810,
-            new Screen(class_243.method_24953((class_2382) echestPos), Direction.field_11033, echestPos, false)); // DOWN face
+        InventoryManager.equipItem(Items.ENDER_CHEST);
+        WorldUtils.lookAtBlock(echestPos);
+        WorldUtils.swapCarriedItems();
+        WorldUtils.sendPlacePacket(Hand.OFF_HAND,
+            new BlockHitResult(Vec3d.ofCenter(echestPos), Direction.DOWN, echestPos, false));
         WorldUtils.swapCarriedItems();
         ++this.farmedCount;
     }
@@ -217,6 +215,6 @@ public class EchestFarmer extends Module {
     @EventHandler
     private void onRender(Render3DEvent event) {
         if (echestPos == null) return;
-        RenderUtils.renderBlock(event, echestPos, Color.WHITE, Color.WHITE, ShapeMode.Lines); // was: jOdDDFXSeWl4
+        RenderUtils.jOdDDFXSeWl4(event, echestPos, Color.WHITE, Color.WHITE, ShapeMode.Lines);
     }
 }
