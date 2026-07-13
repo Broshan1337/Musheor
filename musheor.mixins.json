@@ -4,8 +4,10 @@
   "compatibilityLevel": "JAVA_21",
   "client": [
     "AbstractClientPlayerEntityMixin",
+    "ChatScreenMixin",
     "DebugHudMixin",
     "MixinClientConnection",
+    "ScreenHandlerMixin",
     "MixinClientPlayerInteractionManager",
     "meteor.ClientPlayerInteractionManagerMixin",
     "meteor.PlayerListHudMixin"
@@ -16,8 +18,11 @@
   "mixins": [
     "MixinEntity",
     "MixinLivingEntity",
+    "MixinPearlOutline",
     "MixinPlayerOutline",
+    "meteor.BaritonePathManagerMixin",
     "meteor.BetterTabMixin",
-    "meteor.MixinAutoGap"
+    "meteor.MixinAutoGap",
+    "meteor.TimerMixin"
   ]
 }

@@ -1,17 +1,16 @@
 {
   "schemaVersion": 1,
   "id": "musheor",
-  "version": "1.4.1",
+  "version": "1.6.1",
   "name": "Musheor",
-  "description": "Based meteor addon-only if it was open source lmfao",
+  "description": "Based meteor addon",
   "authors": [
     "musheck"
   ],
   "contact": {
-    "homepage": "https://musheck.dev",
-    "sources": "https://github.com/musheck/musheor-addon"
+    "homepage": "https://musheck.dev"
   },
-  "license": "GPL-3.0",
+  "license": "no license",
   "icon": "assets/template/icon.png",
   "environment": "*",
   "accessWidener": "musheor.accesswidener",
