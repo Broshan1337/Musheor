@@ -1,87 +1,71 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// Interface and members were already readable.
 package musheor.compat;
 
 import java.util.List;
-import net.minecraft.Vec3d;
+import net.minecraft.util.math.Vec3d;
 
+/**
+ * Optional-dependency bridge to Xaero's Minimap/World Map (and XaeroPlus). A
+ * {@code XearoHelperImpl} is installed (via reflection) only when Xaero is present;
+ * {@link #isLoaded()} gates every call. Exposes temp-waypoint management, map line
+ * drawing, and ETA lookups used by the navigation modules.
+ */
 public interface XearoHelper {
-    public List<WaypointData> getWaypoints(boolean var1);
+    List<WaypointData> getWaypoints(boolean tempOnly);
 
-    public WaypointData getOldestWaypoint(boolean var1);
+    WaypointData getOldestWaypoint(boolean tempOnly);
 
-    public Object getCurrentWaypointSetHandle();
+    Object getCurrentWaypointSetHandle();
 
-    public void setWaypointSet(String var1);
+    void setWaypointSet(String name);
 
-    public void restoreWaypointSet(Object var1);
+    void restoreWaypointSet(Object handle);
 
-    public void addWaypointToCurrent(String var1, String var2, Vec3d var3, WaypointColorHint var4);
+    void addWaypointToCurrent(String name, String symbol, Vec3d pos, WaypointColorHint color);
 
-    public void addWaypointToCurrent(String var1, String var2, Vec3d var3, WaypointColorHint var4, boolean var5);
+    void addWaypointToCurrent(String name, String symbol, Vec3d pos, WaypointColorHint color, boolean temporary);
 
-    public void deleteCurrentWaypoint(WaypointData var1);
+    void deleteCurrentWaypoint(WaypointData waypoint);
 
-    public void deleteAllTempWaypoints();
+    void deleteAllTempWaypoints();
 
-    public void updateWaypointSettings();
+    void updateWaypointSettings();
 
-    public void drawLinesOnMap(List<LineData> var1, int var2);
+    void drawLinesOnMap(List<LineData> lines, int color);
 
-    public void drawLinesOnMap(String var1, List<LineData> var2, int var3);
+    void drawLinesOnMap(String id, List<LineData> lines, int color);
 
-    public void clearLinesOnMap();
+    void clearLinesOnMap();
 
-    public void clearLinesOnMap(String var1);
+    void clearLinesOnMap(String id);
 
-    public double distanceToWaypoint(WaypointData var1);
+    double distanceToWaypoint(WaypointData waypoint);
 
-    public String getEtaSuffix(WaypointData var1);
+    String getEtaSuffix(WaypointData waypoint);
 
-    public static boolean isLoaded() {
+    static boolean isLoaded() {
         return XearoHelperHolder.INSTANCE != null;
     }
 
-    public static XearoHelper get() {
+    static XearoHelper get() {
         return XearoHelperHolder.INSTANCE;
     }
 
-    public static void setInstance(XearoHelper xearoHelper) {
-        XearoHelperHolder.INSTANCE = xearoHelper;
+    static void setInstance(XearoHelper instance) {
+        XearoHelperHolder.INSTANCE = instance;
     }
 
-    public static class XearoHelperHolder {
+    /** A line segment (x1,z1)->(x2,z2) drawn on the map. */
+    record LineData(int x1, int z1, int x2, int z2) { }
+
+    /** Hint colour for a created waypoint. */
+    enum WaypointColorHint { WHITE, RED, GOLD, BLUE }
+
+    /** A Xaero waypoint's position, name, temp flag and creation time. */
+    record WaypointData(int x, int y, int z, String name, boolean temporary, long createdAt) { }
+
+    class XearoHelperHolder {
         static XearoHelper INSTANCE = null;
     }
-
-    public static final class WaypointColorHint
-    extends Enum<WaypointColorHint> {
-        public static final /* enum */ WaypointColorHint WHITE = new WaypointColorHint();
-        public static final /* enum */ WaypointColorHint RED = new WaypointColorHint();
-        public static final /* enum */ WaypointColorHint GOLD = new WaypointColorHint();
-        public static final /* enum */ WaypointColorHint BLUE = new WaypointColorHint();
-        private static final /* synthetic */ WaypointColorHint[] $VALUES;
-
-        public static WaypointColorHint[] values() {
-            return (WaypointColorHint[])$VALUES.clone();
-        }
-
-        public static WaypointColorHint valueOf(String string) {
-            return Enum.valueOf(WaypointColorHint.class, string);
-        }
-
-        private static /* synthetic */ WaypointColorHint[] $values() {
-            return new WaypointColorHint[]{WHITE, RED, GOLD, BLUE};
-        }
-
-        static {
-            $VALUES = WaypointColorHint.$values();
-        }
-    }
-
-    public record LineData(int x1, int z1, int x2, int z2) {
-    }
-
-    public record WaypointData(int x, int y, int z, String name, boolean temporary, long createdAt) {
-    }
 }
-

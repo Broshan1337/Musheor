@@ -1,4 +1,5 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// Class name was already readable; internal members were obfuscated.
 package musheor.modules.features;
 
 import java.awt.Color;
@@ -9,7 +10,7 @@ import java.net.URL;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -32,16 +33,15 @@ import meteordevelopment.meteorclient.utils.render.NametagUtils;
 import meteordevelopment.meteorclient.utils.render.RenderUtils;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.orbit.EventHandler;
-import musheor.compat.VersionHelper;
 import musheor.musheor;
+import musheor.compat.VersionHelper;
 import musheor.utils.PearlStore;
 import musheor.utils.TagUtils;
-import net.minecraft.block.EnderChestBlock;
-import net.minecraft.client.gui.DrawContext;
+import net.minecraft.block.TrapdoorBlock;
 import net.minecraft.client.texture.NativeImage;
 import net.minecraft.entity.Entity;
-import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.entity.projectile.EnderPearlEntity;
 import net.minecraft.entity.projectile.ProjectileEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.Identifier;
@@ -49,707 +49,559 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import org.joml.Vector3d;
 
-public class MoreTags
-extends Module {
-    private final SettingGroup sgPlayer;
-    private final SettingGroup sgPearl;
-    public final Setting<Boolean> playerTags;
-    private final Setting<Double> playerTagScale;
-    private final Setting<Boolean> playerTagDistanceScaling;
-    private final Setting<Boolean> ignoreSelf;
-    private final Setting<NameColorType> nameColorType;
-    private final Setting<SettingColor> nameColor;
-    private final Setting<SettingColor> nameGradientStart;
-    private final Setting<SettingColor> nameGradientEnd;
-    private final Setting<SettingColor> friendColor;
-    private final Setting<Boolean> showBackground;
-    private final Setting<SettingColor> backgroundColor;
-    private final Setting<Double> backgroundPadding;
-    private final Setting<OutlineType> outlineType;
-    private final Setting<SettingColor> outlineColorPlayer;
-    private final Setting<Double> backgroundRounding;
-    private final Setting<SettingColor> outlineGradientStart;
-    private final Setting<SettingColor> outlineGradientEnd;
-    private final Setting<DistanceType> distanceType;
-    private final Setting<SettingColor> distanceColor;
-    private final Setting<Boolean> showPlayerSkin;
-    private final Setting<Double> playerSkinScale;
-    private final Setting<Boolean> showItems;
-    private final Setting<Double> itemScale;
-    private final Setting<Double> rowSpacing;
-    private final Setting<PearlRenderingType> renderPearl;
-    private final Setting<SettingColor> outlineColor;
-    private final Setting<SettingColor> unknownColor;
-    private final Setting<TagDisplayType> tagDisplay;
-    private final Setting<Boolean> tagDistanceScaling;
-    private final Setting<Boolean> lockTagPos;
-    private final Setting<SettingColor> tagColor;
-    private final Setting<Double> scale;
-    private final Setting<Double> skinScale;
-    public static final Map<Integer, String> pearlOwnerMap = new HashMap<Integer, String>();
-    private final Set<Integer> pendingPearls;
-    private final Map<Integer, Integer> pearlCountMap;
-    private final Map<String, Identifier> skinTextureMap; // was: qMP0ctta2esan3W
-    private final Set<String> loadingSkins;              // was: ydrC4rD1c1Q8
+/**
+ * "kek-tags" (WIP) — enhanced client nametags. Renders custom player nametags (name colour
+ * modes, friend colour, outline, background, distance, skin face and equipment icons) and
+ * owner tags/skins above thrown ender pearls resting in trapdoor stasis chambers. Pearl
+ * owners are resolved from the pearl's owner entity/UUID, a persisted {@link PearlStore}, or
+ * a queued owner-entity id. Player face skins are fetched from mc-heads.net on a background
+ * thread and greyscaled for offline players.
+ */
+public class MoreTags extends Module {
+    private final SettingGroup sgPlayer = this.settings.createGroup("Player"); // was: psJq59YIbp3Z
+    private final SettingGroup sgPearl = this.settings.createGroup("Pearl");   // was: SOYyh5IPg26f7F
+
+    public final Setting<Boolean> enabled = sgPlayer.add(new BoolSetting.Builder() // was: FvaNWO
+        .name("enabled").description("Show custom nametags above players.").defaultValue(true).build());
+    private final Setting<Double> scale = sgPlayer.add(new DoubleSetting.Builder() // was: rKbT3Ifwo
+        .name("scale").description("Scale of the player nametag.").defaultValue(1.0).sliderRange(0.5, 3.0).decimalPlaces(1).visible(enabled::get).build());
+    private final Setting<Boolean> distanceScaling = sgPlayer.add(new BoolSetting.Builder() // was: r7hOYIKN2
+        .name("distance-scaling").description("Scales the nametag based on distance from the player.").defaultValue(false).visible(enabled::get).build());
+    private final Setting<Boolean> ignoreSelf = sgPlayer.add(new BoolSetting.Builder() // was: oZHMlTL
+        .name("ignore-self").description("Don't render a nametag above your own player.").defaultValue(true).visible(enabled::get).build());
+    private final Setting<NameColorType> nameColorType = sgPlayer.add(new EnumSetting.Builder<NameColorType>() // was: xQr5FhbwpQPWgIQ
+        .name("name-color").description("How to color the player's name.").defaultValue(NameColorType.DEFAULT).visible(enabled::get).build());
+    private final Setting<SettingColor> nameColor = sgPlayer.add(new ColorSetting.Builder() // was: OMMZL1F3q
+        .name("name-color-value").defaultValue(new SettingColor(255, 255, 255)).visible(() -> enabled.get() && nameColorType.get() == NameColorType.CUSTOM).build());
+    private final Setting<SettingColor> nameGradientStart = sgPlayer.add(new ColorSetting.Builder() // was: zu3a44xDeMFMCRwm
+        .name("name-gradient-start").defaultValue(new SettingColor(255, 100, 100)).visible(() -> enabled.get() && nameColorType.get() == NameColorType.GRADIENT).build());
+    private final Setting<SettingColor> nameGradientEnd = sgPlayer.add(new ColorSetting.Builder() // was: krxNb5lcQuWA
+        .name("name-gradient-end").defaultValue(new SettingColor(100, 100, 255)).visible(() -> enabled.get() && nameColorType.get() == NameColorType.GRADIENT).build());
+    private final Setting<SettingColor> friendColor = sgPlayer.add(new ColorSetting.Builder() // was: nt0HZnvBBp
+        .name("friend-color").description("Name color for friends.").defaultValue(new SettingColor(Color.GREEN)).visible(enabled::get).build());
+    private final Setting<Boolean> background = sgPlayer.add(new BoolSetting.Builder() // was: amz3UB1vE
+        .name("background").description("Show a background behind the nametag.").defaultValue(true).visible(enabled::get).build());
+    private final Setting<SettingColor> backgroundColor = sgPlayer.add(new ColorSetting.Builder() // was: sBBIyQG5NWq0K
+        .name("background-color").defaultValue(new SettingColor(0, 0, 0, 160)).visible(() -> enabled.get() && background.get()).build());
+    private final Setting<Double> backgroundPadding = sgPlayer.add(new DoubleSetting.Builder() // was: sZkZ1izAy
+        .name("background-padding").defaultValue(6.0).sliderRange(0.0, 20.0).decimalPlaces(1).visible(() -> enabled.get() && background.get()).build());
+    private final Setting<OutlineType> outlineType = sgPlayer.add(new EnumSetting.Builder<OutlineType>() // was: QYKUhjp
+        .name("outline").defaultValue(OutlineType.OFF).visible(enabled::get).build());
+    private final Setting<SettingColor> outlineColor = sgPlayer.add(new ColorSetting.Builder() // was: NIz4xic3Js9
+        .name("outline-color").defaultValue(new SettingColor(255, 255, 255, 200)).visible(() -> enabled.get() && outlineType.get() == OutlineType.SOLID).build());
+    private final Setting<Double> outlineRounding = sgPlayer.add(new DoubleSetting.Builder() // was: u1WFwbQRSKa
+        .name("outline-rounding").defaultValue(3.0).sliderRange(0.0, 10.0).decimalPlaces(1).visible(() -> enabled.get() && outlineType.get() != OutlineType.OFF).build());
+    private final Setting<SettingColor> outlineGradientStart = sgPlayer.add(new ColorSetting.Builder() // was: LGDfbZq
+        .name("outline-gradient-start").defaultValue(new SettingColor(255, 100, 100)).visible(() -> enabled.get() && outlineType.get() == OutlineType.GRADIENT).build());
+    private final Setting<SettingColor> outlineGradientEnd = sgPlayer.add(new ColorSetting.Builder() // was: to3T8DJCDVX8po
+        .name("outline-gradient-end").defaultValue(new SettingColor(100, 100, 255)).visible(() -> enabled.get() && outlineType.get() == OutlineType.GRADIENT).build());
+    private final Setting<DistanceType> distanceType = sgPlayer.add(new EnumSetting.Builder<DistanceType>() // was: Sd3jEwKuGABy
+        .name("distance").defaultValue(DistanceType.DISTANCE_BASED).visible(enabled::get).build());
+    private final Setting<SettingColor> distanceColor = sgPlayer.add(new ColorSetting.Builder() // was: kJfFkD47Vh
+        .name("distance-color").defaultValue(new SettingColor(Color.WHITE)).visible(() -> enabled.get() && distanceType.get() == DistanceType.CUSTOM).build());
+    private final Setting<Boolean> showSkin = sgPlayer.add(new BoolSetting.Builder() // was: ubHptFBRn5bO
+        .name("show-skin").description("Show the player's face icon next to their name.").defaultValue(true).visible(enabled::get).build());
+    private final Setting<Double> skinScale = sgPlayer.add(new DoubleSetting.Builder() // was: apOpfoOHr3fJVwT
+        .name("skin-scale").defaultValue(1.0).sliderRange(0.5, 3.0).decimalPlaces(1).visible(() -> enabled.get() && showSkin.get()).build());
+    private final Setting<Boolean> showItems = sgPlayer.add(new BoolSetting.Builder() // was: hq1pN0qY
+        .name("show-items").description("Show armor and held items above the nametag.").defaultValue(true).visible(enabled::get).build());
+    private final Setting<Double> itemScale = sgPlayer.add(new DoubleSetting.Builder() // was: ptxWcpd1WV763T5
+        .name("item-scale").defaultValue(1.0).sliderRange(0.5, 2.0).decimalPlaces(1).visible(() -> enabled.get() && showItems.get()).build());
+    private final Setting<Double> rowSpacing = sgPlayer.add(new DoubleSetting.Builder() // was: DnAk86nuI
+        .name("row-spacing").description("Vertical spacing between nametag rows.").defaultValue(2.0).sliderRange(0.0, 10.0).decimalPlaces(1).visible(enabled::get).build());
+
+    private final Setting<PearlRenderingType> pearlRendering = sgPearl.add(new EnumSetting.Builder<PearlRenderingType>() // was: LlN8EpIZKbk
+        .name("pearl-rendering").description("Choose whether to render only pearls that have been assigned an owner or render all pearls.").defaultValue(PearlRenderingType.ASSIGNED_ONLY).build());
+    private final Setting<SettingColor> assignedColor = sgPearl.add(new ColorSetting.Builder() // was: pgjj9cLYUTE5g
+        .name("assigned-rendering-color").description("Outline color of a pearl whose owner has been resolved.").defaultValue(new SettingColor(Color.MAGENTA))
+        .visible(() -> pearlRendering.get() == PearlRenderingType.ASSIGNED_ONLY || pearlRendering.get() == PearlRenderingType.ALL).build());
+    private final Setting<SettingColor> unknownColor = sgPearl.add(new ColorSetting.Builder() // was: IeStEJRJ9eb3l
+        .name("unknown-rendering-color").description("Outline color of a pearl whose owner is still unresolved.").defaultValue(new SettingColor(Color.WHITE))
+        .visible(() -> pearlRendering.get() == PearlRenderingType.ALL).build());
+    private final Setting<TagDisplayType> tagDisplay = sgPearl.add(new EnumSetting.Builder<TagDisplayType>() // was: sFazojak6ig8QgGq
+        .name("tag-display").description("What to display above the pearl.").defaultValue(TagDisplayType.BOTH).build());
+    private final Setting<Boolean> tagDistanceScaling = sgPearl.add(new BoolSetting.Builder() // was: ewq603nIlCd9Gbu
+        .name("tag-distance-scaling").description("Scales the tag automatically based on the distance from the player.").defaultValue(true).visible(() -> tagDisplay.get() != TagDisplayType.OFF).build());
+    private final Setting<Boolean> lockTag = sgPearl.add(new BoolSetting.Builder() // was: ExGM8SQ9Qni
+        .name("lock-tag").description("Locks the tag's position 1 block above the pearl (stops it from bobbing in stasis chambers).").defaultValue(true).build());
+    private final Setting<SettingColor> tagColor = sgPearl.add(new ColorSetting.Builder() // was: yS4isXf3gAzs
+        .name("tag-color").description("Color of the owner's tag rendered above a pearl.").defaultValue(new SettingColor(Color.CYAN)).visible(() -> tagDisplay.get() != TagDisplayType.OFF).build());
+    private final Setting<Double> tagScale = sgPearl.add(new DoubleSetting.Builder() // was: eC9HV2bWGX
+        .name("tag-scale").description("Scale of the nametag rendered above pearls.").defaultValue(1.0).decimalPlaces(1).visible(() -> tagDisplay.get() != TagDisplayType.OFF).build());
+    private final Setting<Double> pearlSkinScale = sgPearl.add(new DoubleSetting.Builder() // was: w9spWeVv3AvI
+        .name("skin-scale").description("Scale of the player face icon rendered above a pearl.").defaultValue(1.0).decimalPlaces(1)
+        .visible(() -> tagDisplay.get() == TagDisplayType.SKIN || tagDisplay.get() == TagDisplayType.BOTH).build());
+
+    /** pearl entity id -> resolved owner name. */
+    public static final Map<Integer, String> pearlOwners = new HashMap<>();     // was: Q90GLXQ0Pef (static)
+    private final Set<Integer> pendingPearls = new HashSet<>();                 // was: HvulV2j9tKjohNgh
+    private final Map<Integer, Integer> pearlOwnerEntityId = new HashMap<>();   // was: Qco5OF (pearl id -> owner entity id)
+    private final Map<String, Identifier> skinTextures = new HashMap<>();       // was: cgqo7J5iR6
+    private final Set<String> skinFetchInProgress = new HashSet<>();            // was: u2kcN4vsQhS46w5s
 
     public MoreTags() {
         super(musheor.MAIN, "kek-tags", "Enhanced nametags for players, pearls and items (WIP)");
-        this.sgPlayer = this.settings.createGroup("Player");
-        this.sgPearl = this.settings.createGroup("Pearl");
-        this.playerTags = this.sgPlayer.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("enabled")).description("Show custom nametags above players.")).defaultValue((Object)true)).build());
-        this.playerTagScale = this.sgPlayer.add((Setting)((DoubleSetting.Builder)((DoubleSetting.Builder)((DoubleSetting.Builder)new DoubleSetting.Builder().name("scale")).description("Scale of the player nametag.")).defaultValue(1.0).sliderRange(0.5, 3.0).decimalPlaces(1).visible(() -> this.playerTags.get())).build());
-        this.playerTagDistanceScaling = this.sgPlayer.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("distance-scaling")).description("Scales the nametag based on distance from the player.")).defaultValue((Object)false)).visible(() -> this.playerTags.get())).build());
-        this.ignoreSelf = this.sgPlayer.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("ignore-self")).description("Don't render a nametag above your own player.")).defaultValue((Object)true)).visible(() -> this.playerTags.get())).build());
-        this.nameColorType = this.sgPlayer.add((Setting)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)new EnumSetting.Builder().name("name-color")).description("How to color the player's name.")).defaultValue((Object)NameColorType.Default)).visible(() -> this.playerTags.get())).build());
-        this.nameColor = this.sgPlayer.add((Setting)((ColorSetting.Builder)((ColorSetting.Builder)new ColorSetting.Builder().name("name-color-value")).defaultValue(new SettingColor(255, 255, 255)).visible(() -> (Boolean)this.playerTags.get() != false && this.nameColorType.get() == NameColorType.Custom)).build());
-        this.nameGradientStart = this.sgPlayer.add((Setting)((ColorSetting.Builder)((ColorSetting.Builder)new ColorSetting.Builder().name("name-gradient-start")).defaultValue(new SettingColor(255, 100, 100)).visible(() -> (Boolean)this.playerTags.get() != false && this.nameColorType.get() == NameColorType.Gradient)).build());
-        this.nameGradientEnd = this.sgPlayer.add((Setting)((ColorSetting.Builder)((ColorSetting.Builder)new ColorSetting.Builder().name("name-gradient-end")).defaultValue(new SettingColor(100, 100, 255)).visible(() -> (Boolean)this.playerTags.get() != false && this.nameColorType.get() == NameColorType.Gradient)).build());
-        this.friendColor = this.sgPlayer.add((Setting)((ColorSetting.Builder)((ColorSetting.Builder)((ColorSetting.Builder)new ColorSetting.Builder().name("friend-color")).description("Name color for friends.")).defaultValue(new SettingColor(Color.GREEN)).visible(() -> this.playerTags.get())).build());
-        this.showBackground = this.sgPlayer.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("background")).description("Show a background behind the nametag.")).defaultValue((Object)true)).visible(() -> this.playerTags.get())).build());
-        this.backgroundColor = this.sgPlayer.add((Setting)((ColorSetting.Builder)((ColorSetting.Builder)new ColorSetting.Builder().name("background-color")).defaultValue(new SettingColor(0, 0, 0, 160)).visible(() -> (Boolean)this.playerTags.get() != false && (Boolean)this.showBackground.get() != false)).build());
-        this.backgroundPadding = this.sgPlayer.add((Setting)((DoubleSetting.Builder)((DoubleSetting.Builder)new DoubleSetting.Builder().name("background-padding")).defaultValue(6.0).sliderRange(0.0, 20.0).decimalPlaces(1).visible(() -> (Boolean)this.playerTags.get() != false && (Boolean)this.showBackground.get() != false)).build());
-        this.outlineType = this.sgPlayer.add((Setting)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)new EnumSetting.Builder().name("outline")).defaultValue((Object)OutlineType.None)).visible(() -> this.playerTags.get())).build());
-        this.outlineColorPlayer = this.sgPlayer.add((Setting)((ColorSetting.Builder)((ColorSetting.Builder)new ColorSetting.Builder().name("outline-color")).defaultValue(new SettingColor(255, 255, 255, 200)).visible(() -> (Boolean)this.playerTags.get() != false && this.outlineType.get() == OutlineType.Solid)).build());
-        this.backgroundRounding = this.sgPlayer.add((Setting)((DoubleSetting.Builder)((DoubleSetting.Builder)new DoubleSetting.Builder().name("outline-rounding")).defaultValue(3.0).sliderRange(0.0, 10.0).decimalPlaces(1).visible(() -> (Boolean)this.playerTags.get() != false && this.outlineType.get() != OutlineType.None)).build());
-        this.outlineGradientStart = this.sgPlayer.add((Setting)((ColorSetting.Builder)((ColorSetting.Builder)new ColorSetting.Builder().name("outline-gradient-start")).defaultValue(new SettingColor(255, 100, 100)).visible(() -> (Boolean)this.playerTags.get() != false && this.outlineType.get() == OutlineType.Gradient)).build());
-        this.outlineGradientEnd = this.sgPlayer.add((Setting)((ColorSetting.Builder)((ColorSetting.Builder)new ColorSetting.Builder().name("outline-gradient-end")).defaultValue(new SettingColor(100, 100, 255)).visible(() -> (Boolean)this.playerTags.get() != false && this.outlineType.get() == OutlineType.Gradient)).build());
-        this.distanceType = this.sgPlayer.add((Setting)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)new EnumSetting.Builder().name("distance")).defaultValue((Object)DistanceType.Colored)).visible(() -> this.playerTags.get())).build());
-        this.distanceColor = this.sgPlayer.add((Setting)((ColorSetting.Builder)((ColorSetting.Builder)new ColorSetting.Builder().name("distance-color")).defaultValue(new SettingColor(Color.WHITE)).visible(() -> (Boolean)this.playerTags.get() != false && this.distanceType.get() == DistanceType.Custom)).build());
-        this.showPlayerSkin = this.sgPlayer.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("show-skin")).description("Show the player's face icon next to their name.")).defaultValue((Object)true)).visible(() -> this.playerTags.get())).build());
-        this.playerSkinScale = this.sgPlayer.add((Setting)((DoubleSetting.Builder)((DoubleSetting.Builder)new DoubleSetting.Builder().name("skin-scale")).defaultValue(1.0).sliderRange(0.5, 3.0).decimalPlaces(1).visible(() -> (Boolean)this.playerTags.get() != false && (Boolean)this.showPlayerSkin.get() != false)).build());
-        this.showItems = this.sgPlayer.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("show-items")).description("Show armor and held items above the nametag.")).defaultValue((Object)true)).visible(() -> this.playerTags.get())).build());
-        this.itemScale = this.sgPlayer.add((Setting)((DoubleSetting.Builder)((DoubleSetting.Builder)new DoubleSetting.Builder().name("item-scale")).defaultValue(1.0).sliderRange(0.5, 2.0).decimalPlaces(1).visible(() -> (Boolean)this.playerTags.get() != false && (Boolean)this.showItems.get() != false)).build());
-        this.rowSpacing = this.sgPlayer.add((Setting)((DoubleSetting.Builder)((DoubleSetting.Builder)((DoubleSetting.Builder)new DoubleSetting.Builder().name("row-spacing")).description("Vertical spacing between nametag rows.")).defaultValue(2.0).sliderRange(0.0, 10.0).decimalPlaces(1).visible(() -> this.playerTags.get())).build());
-        this.renderPearl = this.sgPearl.add((Setting)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)new EnumSetting.Builder().name("pearl-rendering")).description("Choose whether to render only pearls that have been assigned an owner or render all pearls.")).defaultValue((Object)PearlRenderingType.Assigned)).build());
-        this.outlineColor = this.sgPearl.add((Setting)((ColorSetting.Builder)((ColorSetting.Builder)((ColorSetting.Builder)new ColorSetting.Builder().name("assigned-rendering-color")).description("Outline color of a pearl whose owner has been resolved.")).defaultValue(new SettingColor(Color.MAGENTA)).visible(() -> this.renderPearl.get() == PearlRenderingType.Assigned || this.renderPearl.get() == PearlRenderingType.All)).build());
-        this.unknownColor = this.sgPearl.add((Setting)((ColorSetting.Builder)((ColorSetting.Builder)((ColorSetting.Builder)new ColorSetting.Builder().name("unknown-rendering-color")).description("Outline color of a pearl whose owner is still unresolved.")).defaultValue(new SettingColor(Color.WHITE)).visible(() -> this.renderPearl.get() == PearlRenderingType.All)).build());
-        this.tagDisplay = this.sgPearl.add((Setting)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)new EnumSetting.Builder().name("tag-display")).description("What to display above the pearl.")).defaultValue((Object)TagDisplayType.NameAndSkin)).build());
-        this.tagDistanceScaling = this.sgPearl.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("tag-distance-scaling")).description("Scales the tag automatically based on the distance from the player.")).defaultValue((Object)true)).visible(() -> this.tagDisplay.get() != TagDisplayType.None)).build());
-        this.lockTagPos = this.sgPearl.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("lock-tag")).description("Locks the tag's position 1 block above the pearl (stops it from bobbing in stasis chambers).")).defaultValue((Object)true)).build());
-        this.tagColor = this.sgPearl.add((Setting)((ColorSetting.Builder)((ColorSetting.Builder)((ColorSetting.Builder)new ColorSetting.Builder().name("tag-color")).description("Color of the owner's tag rendered above a pearl.")).defaultValue(new SettingColor(Color.CYAN)).visible(() -> this.tagDisplay.get() != TagDisplayType.None)).build());
-        this.scale = this.sgPearl.add((Setting)((DoubleSetting.Builder)((DoubleSetting.Builder)((DoubleSetting.Builder)new DoubleSetting.Builder().name("tag-scale")).description("Scale of the nametag rendered above pearls.")).defaultValue(1.0).decimalPlaces(1).visible(() -> this.tagDisplay.get() != TagDisplayType.None)).build());
-        this.skinScale = this.sgPearl.add((Setting)((DoubleSetting.Builder)((DoubleSetting.Builder)((DoubleSetting.Builder)new DoubleSetting.Builder().name("skin-scale")).description("Scale of the player face icon rendered above a pearl.")).defaultValue(1.0).decimalPlaces(1).visible(() -> this.tagDisplay.get() == TagDisplayType.SkinOnly || this.tagDisplay.get() == TagDisplayType.NameAndSkin)).build());
-        this.pendingPearls = new HashSet<Integer>();
-        this.pearlCountMap = new HashMap<Integer, Integer>();
-        this.skinTextureMap = new HashMap<String, Identifier>();
-        this.loadingSkins = new HashSet<String>();
     }
 
+    @Override
     public void onActivate() {
         PearlStore.load();
-        if (this.mc.world == null) {
-            return;
-        }
+        if (this.mc.world == null) return;
         for (Entity entity : this.mc.world.getEntities()) {
-            if (!(entity instanceof LivingEntity)) continue;
-            LivingEntity pearl = (LivingEntity)entity;
+            if (!(entity instanceof EnderPearlEntity pearl)) continue;
             Entity owner = pearl.getOwner();
             if (owner != null) {
-                String ownerName = owner.getName().getString();
-                pearlOwnerMap.put(pearl.getId(), ownerName);
-                BlockPos chestPos = this.findNearbyEnderChest(pearl);
-                if (chestPos == null) continue;
-                PearlStore.addOrUpdate(ownerName, chestPos, pearl.getId());
-                continue;
-            }
-            BlockPos nearbyChest = this.findNearbyEnderChest(pearl);
-            if (nearbyChest != null) {
-                PearlStore.PearlRecord record = PearlStore.getByPos(nearbyChest);
-                if (record != null) {
-                    pearlOwnerMap.put(pearl.getId(), record.owner);
-                    PearlStore.updateEntityId(nearbyChest, pearl.getId());
-                    continue;
-                }
-            }
-            Integer countId = this.pearlCountMap.get(pearl.getId());
-            if (countId != null) {
-                Entity countEntity = this.mc.world.getEntityById(countId.intValue());
-                if (countEntity instanceof PlayerEntity player) {
-                    String playerName = player.getName().getString();
-                    pearlOwnerMap.put(pearl.getId(), playerName);
-                    if (nearbyChest != null) {
-                        PearlStore.addOrUpdate(playerName, nearbyChest, pearl.getId());
+                String name = owner.getName().getString();
+                pearlOwners.put(pearl.getId(), name);
+                BlockPos pos = this.getTrapdoorPos(pearl);
+                if (pos != null) PearlStore.addOrUpdate(name, pos, pearl.getId());
+            } else {
+                BlockPos pos = this.getTrapdoorPos(pearl);
+                if (pos != null) {
+                    PearlStore.PearlRecord record = PearlStore.getByPos(pos);
+                    if (record != null) {
+                        pearlOwners.put(pearl.getId(), record.owner);
+                        PearlStore.updateEntityId(pos, pearl.getId());
+                        continue;
                     }
-                    continue;
+                }
+                Integer ownerEntityId = this.pearlOwnerEntityId.get(pearl.getId());
+                if (ownerEntityId != null && this.mc.world.getEntityById(ownerEntityId) instanceof PlayerEntity player) {
+                    String name = player.getName().getString();
+                    pearlOwners.put(pearl.getId(), name);
+                    if (pos != null) PearlStore.addOrUpdate(name, pos, pearl.getId());
+                } else {
+                    for (PearlStore.PearlRecord record : PearlStore.getPearls()) {
+                        if (record.entityId != pearl.getId()) continue;
+                        pearlOwners.put(pearl.getId(), record.owner);
+                        PearlStore.updateEntityId(record.pos, pearl.getId());
+                    }
+                    this.pendingPearls.add(pearl.getId());
                 }
             }
-            Iterator<PearlStore.PearlRecord> it = PearlStore.getPearls().iterator();
-            while (it.hasNext()) {
-                PearlStore.PearlRecord pearlRecord = it.next();
-                if (pearlRecord.BLEzYuOlPg4yGLp != pearl.getId()) continue;
-                pearlOwnerMap.put(pearl.getId(), pearlRecord.owner);
-                PearlStore.updateEntityId(pearlRecord.pos, pearl.getId());
-                break;
+        }
+    }
+
+    @Override
+    public void onDeactivate() {
+        pearlOwners.clear();
+        this.pendingPearls.clear();
+        this.skinTextures.forEach((name, id) -> this.mc.getTextureManager().destroyTexture(id));
+        this.skinTextures.clear();
+        this.skinFetchInProgress.clear();
+    }
+
+    @EventHandler(priority = -200)
+    private void onEntityAdded(EntityAddedEvent event) { // was: FvaNWO(EntityAddedEvent)
+        if (this.mc.world == null || this.mc.player == null) return;
+        if (event.entity instanceof EnderPearlEntity pearl) {
+            this.trackPearl(pearl);
+        } else if (event.entity instanceof PlayerEntity player) {
+            String name = player.getName().getString();
+            if (this.skinTextures.containsKey(name)) {
+                this.mc.getTextureManager().destroyTexture(this.skinTextures.get(name));
+                this.skinTextures.remove(name);
+            }
+            this.pearlOwnerEntityId.entrySet().removeIf(entry -> {
+                if (entry.getValue() == player.getId()) {
+                    int pearlId = entry.getKey();
+                    pearlOwners.put(pearlId, player.getName().getString());
+                    if (this.mc.world.getEntityById(pearlId) instanceof EnderPearlEntity pearl2) {
+                        BlockPos pos = this.getTrapdoorPos(pearl2);
+                        if (pos != null) PearlStore.addOrUpdate(player.getName().getString(), pos, pearlId);
+                    }
+                    this.pendingPearls.remove(pearlId);
+                    return true;
+                }
+                return false;
+            });
+            this.resolvePendingPearls();
+        }
+    }
+
+    @EventHandler
+    private void onTick(TickEvent.Post event) { // was: FvaNWO(Post)
+        if (this.mc.world != null && !this.pendingPearls.isEmpty()) this.resolvePendingPearls();
+    }
+
+    /** Records a newly-added pearl's owner (directly, from the store, or as pending). */
+    private void trackPearl(EnderPearlEntity pearl) { // was: psJq59YIbp3Z(EnderPearlEntity)
+        Entity owner = pearl.getOwner();
+        if (owner != null) {
+            String name = owner.getName().getString();
+            pearlOwners.put(pearl.getId(), name);
+            BlockPos pos = this.getTrapdoorPos(pearl);
+            if (pos != null) PearlStore.addOrUpdate(name, pos, pearl.getId());
+        } else {
+            BlockPos pos = this.getTrapdoorPos(pearl);
+            if (pos != null) {
+                PearlStore.PearlRecord record = PearlStore.getByPos(pos);
+                if (record != null) {
+                    pearlOwners.put(pearl.getId(), record.owner);
+                    PearlStore.updateEntityId(pos, pearl.getId());
+                    return;
+                }
             }
             this.pendingPearls.add(pearl.getId());
         }
     }
 
-    public void onDeactivate() {
-        pearlOwnerMap.clear();
-        this.pendingPearls.clear();
-        this.skinTextureMap.forEach((string, identifier) -> this.mc.getTextureManager().destroyTexture(identifier));
-        this.skinTextureMap.clear();
-        this.loadingSkins.clear();
-    }
-
-    @EventHandler(priority=-200)
-    private void onEntityAdded(EntityAddedEvent entityAddedEvent) {
-        if (this.mc.world == null || this.mc.player == null) {
-            return;
-        }
-        Object object = entityAddedEvent.entity;
-        if (object instanceof LivingEntity) {
-            LivingEntity LivingEntity2 = (LivingEntity)object;
-            this.processPearlEntity(LivingEntity2);
-        } else {
-            object = entityAddedEvent.entity;
-            if (object instanceof PlayerEntity) {
-                PlayerEntity PlayerEntity2 = (PlayerEntity)object;
-                if (this.skinTextureMap.containsKey(object = PlayerEntity2.getName().getString())) {
-                    this.mc.getTextureManager().destroyTexture(this.skinTextureMap.get(object));
-                    this.skinTextureMap.remove(object);
-                }
-                this.pearlCountMap.entrySet().removeIf(entry -> {
-                    if (((Integer)entry.getValue()).intValue() == PlayerEntity2.getId()) {
-                        LivingEntity LivingEntity2;
-                        BlockPos BlockPos2;
-                        int n = (Integer)entry.getKey();
-                        pearlOwnerMap.put(n, PlayerEntity2.getName().getString());
-                        Entity Entity2 = this.mc.world.getEntityById(n);
-                        if (Entity2 instanceof LivingEntity && (BlockPos2 = this.findNearbyEnderChest(LivingEntity2 = (LivingEntity)Entity2)) != null) {
-                            PearlStore.jOdDDFXSeWl4(PlayerEntity2.getName().getString(), BlockPos2, n);
-                        }
-                        this.pendingPearls.remove(n);
-                        return true;
-                    }
-                    return false;
-                });
-                this.resolvePendingPearls();
-            }
-        }
-    }
-
-    @EventHandler
-    private void onTick(TickEvent.Post post) {
-        if (this.mc.world == null || this.pendingPearls.isEmpty()) {
-            return;
-        }
-        this.resolvePendingPearls();
-    }
-
-    private void processPearlEntity(LivingEntity LivingEntity2) {
-        PearlStore.PearlRecord pearlRecord;
-        Entity Entity2 = LivingEntity2.getOwner();
-        if (Entity2 != null) {
-            String string = Entity2.getName().getString();
-            pearlOwnerMap.put(LivingEntity2.getId(), string);
-            BlockPos BlockPos2 = this.findNearbyEnderChest(LivingEntity2);
-            if (BlockPos2 != null) {
-                PearlStore.addOrUpdate(string, BlockPos2, LivingEntity2.getId());
-            }
-            return;
-        }
-        BlockPos BlockPos3 = this.findNearbyEnderChest(LivingEntity2);
-        if (BlockPos3 != null && (pearlRecord = PearlStore.getByPos(BlockPos3)) != null) {
-            pearlOwnerMap.put(LivingEntity2.getId(), pearlRecord.owner);
-            PearlStore.addOrUpdate(BlockPos3, LivingEntity2.getId());
-            return;
-        }
-        this.pendingPearls.add(LivingEntity2.getId());
-    }
-
-    private void resolvePendingPearls() {
-        this.pendingPearls.removeIf(n -> {
-            Entity Entity2 = this.mc.world.getEntityById(n.intValue());
-            if (Entity2 == null) {
-                return true;
-            }
-            if (!(Entity2 instanceof LivingEntity)) {
-                return true;
-            }
-            LivingEntity LivingEntity2 = (LivingEntity)Entity2;
-            UUID uUID = this.getOwnerUuid(LivingEntity2);
-            if (uUID == null) {
-                return false;
-            }
-            PlayerEntity PlayerEntity2 = this.mc.world.getPlayers().stream().filter(p -> p.getUuid().equals(uUID)).findFirst().orElse(null);
-            if (PlayerEntity2 == null) {
-                return false;
-            }
-            String string = PlayerEntity2.getName().getString();
-            pearlOwnerMap.put((Integer)n, string);
-            BlockPos BlockPos2 = this.findNearbyEnderChest(LivingEntity2);
-            if (BlockPos2 != null) {
-                PearlStore.addOrUpdate(string, BlockPos2, n);
-            }
+    /** Tries to resolve any pending pearls' owners from their (reflected) owner UUID. */
+    private void resolvePendingPearls() { // was: FvaNWO()
+        this.pendingPearls.removeIf(id -> {
+            Entity entity = this.mc.world.getEntityById(id);
+            if (entity == null) return true;
+            if (!(entity instanceof EnderPearlEntity pearl)) return true;
+            UUID ownerUuid = this.getOwnerUuid(pearl);
+            if (ownerUuid == null) return false;
+            PlayerEntity owner = this.mc.world.getPlayers().stream().filter(p -> p.getUuid().equals(ownerUuid)).findFirst().orElse(null);
+            if (owner == null) return false;
+            String name = owner.getName().getString();
+            pearlOwners.put(id, name);
+            BlockPos pos = this.getTrapdoorPos(pearl);
+            if (pos != null) PearlStore.addOrUpdate(name, pos, id);
             return true;
         });
     }
 
-    private BlockPos findNearbyEnderChest(LivingEntity LivingEntity2) {
-        if (this.mc.world == null) {
-            return null;
-        }
-        BlockPos BlockPos2 = LivingEntity2.getBlockPos();
-        for (BlockPos BlockPos3 : new BlockPos[]{BlockPos2, BlockPos2.up()}) {
-            if (!(this.mc.world.getBlockState(BlockPos3).getBlock() instanceof EnderChestBlock)) continue;
-            return BlockPos3;
+    /** The trapdoor position the pearl is resting on (at its block, or one below), or null. */
+    private BlockPos getTrapdoorPos(EnderPearlEntity pearl) { // was: SOYyh5IPg26f7F(EnderPearlEntity)
+        if (this.mc.world == null) return null;
+        BlockPos base = pearl.getBlockPos();
+        for (BlockPos candidate : new BlockPos[]{base.down(), base}) {
+            if (this.mc.world.getBlockState(candidate).getBlock() instanceof TrapdoorBlock) return candidate;
         }
         return null;
     }
 
-    public void setPearlCount(int n, int n2) {
-        this.pearlCountMap.put(n, n2);
+    /** Assigns a pearl's owner by entity id (called externally when the owner is known). */
+    public void assignPearlOwner(int pearlId, int ownerEntityId) { // was: FvaNWO(int,int)
+        this.pearlOwnerEntityId.put(pearlId, ownerEntityId);
     }
 
-    private UUID getOwnerUuid(LivingEntity LivingEntity2) {
+    /** Reads the private {@code ownerUuid} field of the pearl's projectile via reflection. */
+    private UUID getOwnerUuid(EnderPearlEntity pearl) { // was: rKbT3Ifwo(EnderPearlEntity)
         try {
-            Field field = ProjectileEntity.class.getDeclaredField("ownerUuid");
-            field.setAccessible(true);
-            return (UUID)field.get(LivingEntity2);
-        }
-        catch (Exception exception) {
+            Field f = ProjectileEntity.class.getDeclaredField("ownerUuid");
+            f.setAccessible(true);
+            return (UUID) f.get(pearl);
+        } catch (Exception e) {
             return null;
         }
     }
 
     @EventHandler
-    private void onRender2D(Render2DEvent render2DEvent) {
-        if (this.tagDisplay.get() == TagDisplayType.None || this.mc.world == null || pearlOwnerMap.isEmpty()) {
-            return;
-        }
-        boolean bl = this.tagDisplay.get() == TagDisplayType.SkinOnly || this.tagDisplay.get() == TagDisplayType.NameAndSkin;
-        boolean bl2 = this.tagDisplay.get() == TagDisplayType.NameOnly || this.tagDisplay.get() == TagDisplayType.NameAndSkin;
-        for (Map.Entry<Integer, String> entry : pearlOwnerMap.entrySet()) {
-            float f;
-            boolean bl3;
-            Entity Entity2 = this.mc.world.getEntityById(entry.getKey().intValue());
-            if (!(Entity2 instanceof LivingEntity)) continue;
-            LivingEntity LivingEntity2 = (LivingEntity)Entity2;
-            String string = entry.getValue();
-            if (bl) {
-                this.loadSkin(string);
+    private void renderPearlTags(Render2DEvent event) { // was: FvaNWO(Render2DEvent)
+        if (this.tagDisplay.get() == TagDisplayType.OFF || this.mc.world == null || pearlOwners.isEmpty()) return;
+        boolean showSkin = this.tagDisplay.get() == TagDisplayType.SKIN || this.tagDisplay.get() == TagDisplayType.BOTH;
+        boolean showName = this.tagDisplay.get() == TagDisplayType.NAME || this.tagDisplay.get() == TagDisplayType.BOTH;
+
+        for (Map.Entry<Integer, String> entry : pearlOwners.entrySet()) {
+            if (!(this.mc.world.getEntityById(entry.getKey()) instanceof EnderPearlEntity pearl)) continue;
+            String playerName = entry.getValue();
+            if (showSkin) this.fetchSkin(playerName);
+
+            Vec3d lerpedPos = pearl.getLerpedPos(event.tickDelta);
+            double lerpedY = lerpedPos.y + pearl.getHeight() + 0.5;
+            Vector3d pos = new Vector3d(lerpedPos.x, !this.lockTag.get() ? lerpedY : Math.ceil(lerpedY), lerpedPos.z);
+            if (NametagUtils.to2D(pos, this.tagScale.get(), this.tagDistanceScaling.get())) {
+                NametagUtils.begin(pos);
+                TextRenderer textRenderer = TextRenderer.get();
+                float iconSize = (float) (8.0 * this.pearlSkinScale.get() * 2.0);
+                boolean hasSkin = showSkin && this.skinTextures.containsKey(playerName);
+                if (hasSkin) {
+                    Identifier skinId = this.skinTextures.get(playerName);
+                    float x0 = showName ? -iconSize - 2.0F : -iconSize / 2.0F;
+                    float y0 = -iconSize / 2.0F;
+                    VersionHelper.get().drawSkinTexture(skinId, x0, y0, iconSize, iconSize);
+                }
+                if (showName) {
+                    textRenderer.beginBig();
+                    double w = textRenderer.getWidth(playerName);
+                    float nameX = hasSkin ? 2.0F : (float) (-w / 2.0);
+                    textRenderer.render(playerName, nameX, -textRenderer.getHeight() / 2.0, this.tagColor.get());
+                    textRenderer.end();
+                }
+                NametagUtils.end();
             }
-            Vec3d Vec3d2 = LivingEntity2.getLerpedPos(render2DEvent.tickDelta);
-            double d = Vec3d2.y + (double)LivingEntity2.getHeight() + 0.5;
-            Vector3d vector3d = new Vector3d(Vec3d2.x, (Boolean)this.lockTagPos.get() == false ? d : Math.ceil(d), Vec3d2.z);
-            if (!NametagUtils.to2D((Vector3d)vector3d, (double)((Double)this.scale.get()), (boolean)((Boolean)this.tagDistanceScaling.get()))) continue;
-            NametagUtils.begin((Vector3d)vector3d);
-            TextRenderer textRenderer = TextRenderer.get();
-            float f2 = (float)(8.0 * (Double)this.skinScale.get() * 2.0);
-            boolean bl4 = bl3 = bl && this.skinTextureMap.containsKey(string);
-            if (bl3) {
-                Identifier Identifier2 = this.skinTextureMap.get(string);
-                float f3 = bl2 ? -f2 - 2.0f : -f2 / 2.0f;
-                f = -f2 / 2.0f;
-                VersionHelper.get().drawSkinTexture(Identifier2, f3, f, f2, f2);
-            }
-            if (bl2) {
-                textRenderer.beginBig();
-                double d2 = textRenderer.getWidth(string);
-                f = bl3 ? 2.0f : (float)(-d2 / 2.0);
-                textRenderer.render(string, (double)f, -textRenderer.getHeight() / 2.0, (meteordevelopment.meteorclient.utils.render.color.Color)this.tagColor.get());
-                textRenderer.end();
-            }
-            NametagUtils.end();
         }
     }
 
     @EventHandler
-    private void onRenderPlayerTags(Render2DEvent render2DEvent) {
-        if (!((Boolean)this.playerTags.get()).booleanValue() || this.mc.world == null) {
-            return;
-        }
-        for (PlayerEntity PlayerEntity2 : this.mc.world.getPlayers()) {
-            float f;
-            float f2;
-            boolean bl;
-            boolean bl2 = bl = !((Freecam)Modules.get().get(Freecam.class)).isActive() && this.mc.options.getPerspective().isFirstPerson();
-            if (PlayerEntity2 == this.mc.player && (((Boolean)this.ignoreSelf.get()).booleanValue() || bl)) continue;
-            String string = PlayerEntity2.getName().getString();
-            boolean bl3 = TagUtils.VYEwzRq(PlayerEntity2);
-            double d = TagUtils.vgrtgn5(PlayerEntity2);
-            if (((Boolean)this.showPlayerSkin.get()).booleanValue()) {
-                this.loadSkin(string);
-            }
-            Vec3d Vec3d2 = PlayerEntity2.getLerpedPos(render2DEvent.tickDelta).add(0.0, (double)PlayerEntity2.getEyeHeight(PlayerEntity2.getPose()) + 0.6, 0.0);
-            Vector3d vector3d = new Vector3d(Vec3d2.x, Vec3d2.y, Vec3d2.z);
-            if (!NametagUtils.to2D((Vector3d)vector3d, (double)((Double)this.playerTagScale.get()), (boolean)((Boolean)this.playerTagDistanceScaling.get()))) continue;
-            NametagUtils.begin((Vector3d)vector3d);
-            TextRenderer textRenderer = TextRenderer.get();
-            float f3 = ((Double)this.backgroundPadding.get()).floatValue();
-            float f4 = ((Double)this.rowSpacing.get()).floatValue();
-            float f5 = (float)(8.0 * (Double)this.playerSkinScale.get() * 2.0);
-            boolean bl4 = (Boolean)this.showPlayerSkin.get() != false && this.skinTextureMap.containsKey(string);
-            textRenderer.beginBig();
-            float f6 = (float)textRenderer.getWidth(string);
-            float f7 = (float)textRenderer.getHeight();
-            textRenderer.end();
-            float f8 = bl4 ? f5 + 2.0f : 0.0f;
-            float f9 = f6 + f8;
-            float f10 = Math.max(f7, bl4 ? f5 : 0.0f);
-            float f11 = -(f9 / 2.0f) - f3;
-            float f12 = -(f10 / 2.0f) - f3;
-            float f13 = f9 + f3 * 2.0f;
-            float f14 = f10 + f3 * 2.0f;
-            if (((Boolean)this.showBackground.get()).booleanValue()) {
+    private void renderPlayerTags(Render2DEvent event) { // was: Q90GLXQ0Pef(Render2DEvent)
+        if (!this.enabled.get() || this.mc.world == null) return;
+        for (PlayerEntity player : this.mc.world.getPlayers()) {
+            boolean noSpecialView = !((Freecam) Modules.get().get(Freecam.class)).isActive() && this.mc.options.getPerspective().isFirstPerson();
+            if (player == this.mc.player && (this.ignoreSelf.get() || noSpecialView)) continue;
+
+            String name = player.getName().getString();
+            boolean friend = TagUtils.isFriend(player);
+            double distance = TagUtils.distanceTo(player);
+            if (this.showSkin.get()) this.fetchSkin(name);
+
+            Vec3d headPos = player.getLerpedPos(event.tickDelta).add(0.0, player.getEyeHeight(player.getPose()) + 0.6, 0.0);
+            Vector3d pos = new Vector3d(headPos.x, headPos.y, headPos.z);
+            if (!NametagUtils.to2D(pos, this.scale.get(), this.distanceScaling.get())) continue;
+
+            NametagUtils.begin(pos);
+            TextRenderer tr = TextRenderer.get();
+            float pad = this.backgroundPadding.get().floatValue();
+            float spacing = this.rowSpacing.get().floatValue();
+            float iconSize = (float) (8.0 * this.skinScale.get() * 2.0);
+            boolean hasSkin = this.showSkin.get() && this.skinTextures.containsKey(name);
+            tr.beginBig();
+            float nameW = (float) tr.getWidth(name);
+            float nameH = (float) tr.getHeight();
+            tr.end();
+            float skinW = hasSkin ? iconSize + 2.0F : 0.0F;
+            float totalNameLineW = nameW + skinW;
+            float totalNameLineH = Math.max(nameH, hasSkin ? iconSize : 0.0F);
+            float bgX = -(totalNameLineW / 2.0F) - pad;
+            float bgY = -(totalNameLineH / 2.0F) - pad;
+            float bgW = totalNameLineW + pad * 2.0F;
+            float bgH = totalNameLineH + pad * 2.0F;
+
+            if (this.background.get()) {
                 Renderer2D.COLOR.begin();
-                Renderer2D.COLOR.quad((double)f11, (double)f12, (double)f13, (double)f14, (meteordevelopment.meteorclient.utils.render.color.Color)this.backgroundColor.get());
+                Renderer2D.COLOR.quad(bgX, bgY, bgW, bgH, this.backgroundColor.get());
                 VersionHelper.get().renderColorRenderer();
             }
-            if (this.outlineType.get() != OutlineType.None) {
-                int n;
-                int n2;
-                if (this.outlineType.get() == OutlineType.Gradient) {
-                    n2 = this.toColorInt((SettingColor)this.outlineGradientStart.get());
-                    n = this.toColorInt((SettingColor)this.outlineGradientEnd.get());
+
+            if (this.outlineType.get() != OutlineType.OFF) {
+                int colA;
+                int colB;
+                if (this.outlineType.get() == OutlineType.GRADIENT) {
+                    colA = this.toRgb(this.outlineGradientStart.get());
+                    colB = this.toRgb(this.outlineGradientEnd.get());
                 } else {
-                    n = n2 = this.toColorInt((SettingColor)this.outlineColorPlayer.get());
+                    colA = this.toRgb(this.outlineColor.get());
+                    colB = colA;
                 }
-                this.drawRoundedOutline(f11, f12, f13, f14, ((Double)this.backgroundRounding.get()).floatValue(), n2, n);
+                this.drawRoundedOutline(bgX, bgY, bgW, bgH, this.outlineRounding.get().floatValue(), colA, colB);
             }
-            if (bl4) {
-                Identifier Identifier2 = this.skinTextureMap.get(string);
-                float f15 = -(f9 / 2.0f);
-                float f16 = -f5 / 2.0f;
-                VersionHelper.get().drawSkinTexture(Identifier2, f15, f16, f5, f5);
+
+            if (hasSkin) {
+                Identifier skinId = this.skinTextures.get(name);
+                float skinX = -(totalNameLineW / 2.0F);
+                float skinY = -iconSize / 2.0F;
+                VersionHelper.get().drawSkinTexture(skinId, skinX, skinY, iconSize, iconSize);
             }
-            textRenderer.beginBig();
-            float f17 = bl4 ? -(f9 / 2.0f) + f8 : -(f6 / 2.0f);
-            float f18 = -(f7 / 2.0f);
-            if (bl3) {
-                textRenderer.render(string, (double)f17, (double)f18, (meteordevelopment.meteorclient.utils.render.color.Color)this.friendColor.get());
-            } else if (this.nameColorType.get() == NameColorType.Gradient) {
-                this.renderGradientText(textRenderer, string, f17, f18, (SettingColor)this.nameGradientStart.get(), (SettingColor)this.nameGradientEnd.get());
-            } else if (this.nameColorType.get() == NameColorType.Custom) {
-                textRenderer.render(string, (double)f17, (double)f18, (meteordevelopment.meteorclient.utils.render.color.Color)this.nameColor.get());
+
+            tr.beginBig();
+            float textX = hasSkin ? -(totalNameLineW / 2.0F) + skinW : -(nameW / 2.0F);
+            float textY = -(nameH / 2.0F);
+            if (friend) {
+                tr.render(name, textX, textY, this.friendColor.get());
+            } else if (this.nameColorType.get() == NameColorType.GRADIENT) {
+                this.renderGradientText(tr, name, textX, textY, this.nameGradientStart.get(), this.nameGradientEnd.get());
+            } else if (this.nameColorType.get() == NameColorType.CUSTOM) {
+                tr.render(name, textX, textY, this.nameColor.get());
             } else {
-                textRenderer.render(string, (double)f17, (double)f18, (meteordevelopment.meteorclient.utils.render.color.Color)new SettingColor(255, 255, 255));
+                tr.render(name, textX, textY, new SettingColor(255, 255, 255));
             }
-            textRenderer.end();
-            if (this.distanceType.get() != DistanceType.None) {
-                int n;
-                String string2 = String.format("[%dm]", (int)d);
-                textRenderer.begin();
-                f2 = (float)textRenderer.getWidth(string2);
-                f = f10 / 2.0f + f4;
-                if (this.distanceType.get() == DistanceType.Colored) {
-                    n = TagUtils.BX92A0OIIvD9(d);
+            tr.end();
+
+            if (this.distanceType.get() != DistanceType.OFF) {
+                String distStr = String.format("[%dm]", (int) distance);
+                tr.begin();
+                float distW = (float) tr.getWidth(distStr);
+                float distY = totalNameLineH / 2.0F + spacing;
+                int distCol;
+                if (this.distanceType.get() == DistanceType.DISTANCE_BASED) {
+                    distCol = TagUtils.distanceColor(distance);
                 } else {
-                    SettingColor settingColor = (SettingColor)this.distanceColor.get();
-                    n = settingColor.r << 16 | settingColor.g << 8 | settingColor.b;
+                    SettingColor dc = this.distanceColor.get();
+                    distCol = dc.r << 16 | dc.g << 8 | dc.b;
                 }
-                int n3 = n >> 16 & 0xFF;
-                int n4 = n >> 8 & 0xFF;
-                int n5 = n & 0xFF;
-                textRenderer.render(string2, (double)(-(f2 / 2.0f)), (double)f, (meteordevelopment.meteorclient.utils.render.color.Color)new SettingColor(n3, n4, n5, 255));
-                textRenderer.end();
+                int dr = distCol >> 16 & 0xFF;
+                int dg = distCol >> 8 & 0xFF;
+                int db = distCol & 0xFF;
+                tr.render(distStr, -(distW / 2.0F), distY, new SettingColor(dr, dg, db, 255));
+                tr.end();
             }
-            if (((Boolean)this.showItems.get()).booleanValue() && TagUtils.setPearlCount(PlayerEntity2)) {
-                ArrayList<ItemStack> arrayList = new ArrayList<ItemStack>();
-                arrayList.add(TagUtils.mp3zoXQFKUKYj5(PlayerEntity2));
-                arrayList.addAll(TagUtils.jOdDDFXSeWl4(PlayerEntity2));
-                arrayList.add(TagUtils.Gt56Sj4a6BWhgB(PlayerEntity2));
-                arrayList.removeIf(ItemStack::isEmpty);
-                f2 = (float)(16.0 * (Double)this.itemScale.get());
-                f = 2.0f;
-                float f19 = (float)arrayList.size() * (f2 + f) - f;
-                float f20 = -f19 / 2.0f;
-                float f21 = -(f10 / 2.0f) - f3 - f2 - f4;
-                for (ItemStack ItemStack2 : arrayList) {
-                    RenderUtils.drawItem((DrawContext)render2DEvent.drawContext, (ItemStack)ItemStack2, (int)((int)f20), (int)((int)f21), (float)((Double)this.itemScale.get()).floatValue(), (boolean)true);
-                    if (ItemStack2.getCount() > 1) {
-                        String string3 = String.valueOf(ItemStack2.getCount());
-                        textRenderer.begin(0.5, false, true);
-                        float f22 = (float)textRenderer.getWidth(string3);
-                        textRenderer.render(string3, (double)(f20 + f2 - f22 - 1.0f), (double)(f21 + f2 - (float)textRenderer.getHeight()), (meteordevelopment.meteorclient.utils.render.color.Color)new SettingColor(255, 255, 255));
-                        textRenderer.end();
+
+            if (this.showItems.get() && TagUtils.hasAnyEquipment(player)) {
+                List<ItemStack> items = new ArrayList<>();
+                items.add(TagUtils.getMainHand(player));
+                items.addAll(TagUtils.getArmor(player));
+                items.add(TagUtils.getOffHand(player));
+                items.removeIf(ItemStack::isEmpty);
+                float itemSz = (float) (16.0 * this.itemScale.get());
+                float itemGap = 2.0F;
+                float totalItemW = items.size() * (itemSz + itemGap) - itemGap;
+                float itemStartX = -totalItemW / 2.0F;
+                float itemY = -(totalNameLineH / 2.0F) - pad - itemSz - spacing;
+                for (ItemStack stack : items) {
+                    RenderUtils.drawItem(event.drawContext, stack, (int) itemStartX, (int) itemY, this.itemScale.get().floatValue(), false);
+                    if (stack.getCount() > 1) {
+                        String countStr = String.valueOf(stack.getCount());
+                        tr.begin(0.5, false, true);
+                        float countW = (float) tr.getWidth(countStr);
+                        tr.render(countStr, itemStartX + itemSz - countW - 1.0F, itemY + itemSz - (float) tr.getHeight(), new SettingColor(255, 255, 255));
+                        tr.end();
                     }
-                    f20 += f2 + f;
+                    itemStartX += itemSz + itemGap;
                 }
             }
+
             NametagUtils.end();
         }
     }
 
-    /** Returns true if the given pearl entity should have a tag rendered above it. */
-    public boolean shouldRenderPearlTag(LivingEntity LivingEntity2) { // was: TAdu5cndwWu3A1
-        if (!this.isActive() || this.renderPearl.get() == PearlRenderingType.None) {
-            return false;
-        }
-        int n = LivingEntity2.getId();
-        return switch (((PearlRenderingType)((Object)this.renderPearl.get())).ordinal()) {
-            case 1 -> pearlOwnerMap.containsKey(n);
-            case 2 -> true;
+    /** True if a pearl should be ESP-rendered under the current pearl-rendering mode. */
+    public boolean shouldRenderPearl(EnderPearlEntity pearl) { // was: FvaNWO(EnderPearlEntity)
+        if (!this.isActive() || this.pearlRendering.get() == PearlRenderingType.OFF) return false;
+        int id = pearl.getId();
+        return switch (this.pearlRendering.get()) {
+            case ASSIGNED_ONLY -> pearlOwners.containsKey(id);
+            case ALL -> true;
             default -> false;
         };
     }
 
-    /** Returns the outline color (packed RGB int) for the given pearl entity. */
-    public int getPearlOutlineColor(LivingEntity LivingEntity2) { // was: vgrtgn5
-        SettingColor settingColor = pearlOwnerMap.containsKey(LivingEntity2.getId()) ? (SettingColor)this.outlineColor.get() : (SettingColor)this.unknownColor.get();
-        return settingColor.r << 16 | settingColor.g << 8 | settingColor.b;
+    /** The outline colour (RGB) to render a pearl with, depending on whether its owner is known. */
+    public int getPearlOutlineColor(EnderPearlEntity pearl) { // was: Q90GLXQ0Pef(EnderPearlEntity)
+        SettingColor color = pearlOwners.containsKey(pearl.getId()) ? this.assignedColor.get() : this.unknownColor.get();
+        return color.r << 16 | color.g << 8 | color.b;
     }
 
-    /** Asynchronously fetches and registers the skin texture for the given player name. */
-    private void loadSkin(String string) { // was: e5oi2ZF
-        if (this.skinTextureMap.containsKey(string) || this.loadingSkins.contains(string)) {
-            return;
-        }
-        this.loadingSkins.add(string);
+    /** Fetches a player's face from mc-heads.net on a background thread and registers it as a texture. */
+    private void fetchSkin(String playerName) { // was: FvaNWO(String)
+        if (this.skinTextures.containsKey(playerName) || this.skinFetchInProgress.contains(playerName)) return;
+        this.skinFetchInProgress.add(playerName);
         Thread thread = new Thread(() -> {
             try {
-                URL uRL = new URL("https://mc-heads.net/avatar/" + string + "/64");
-                HttpURLConnection httpURLConnection = (HttpURLConnection)uRL.openConnection();
-                httpURLConnection.setConnectTimeout(5000);
-                httpURLConnection.setReadTimeout(5000);
-                httpURLConnection.setRequestProperty("User-Agent", "musheor-addon");
-                BufferedImage bufferedImage = ImageIO.read(httpURLConnection.getInputStream());
-                if (bufferedImage == null) {
-                    this.loadingSkins.remove(string);
+                URL url = new URL("https://mc-heads.net/avatar/" + playerName + "/64");
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setConnectTimeout(5000);
+                conn.setReadTimeout(5000);
+                conn.setRequestProperty("User-Agent", "musheor-addon");
+                BufferedImage img = ImageIO.read(conn.getInputStream());
+                if (img == null) {
+                    this.skinFetchInProgress.remove(playerName);
                     return;
                 }
-                boolean bl = this.isOnSameServer(string);
-                if (!bl) {
-                    bufferedImage = this.toGrayscale(bufferedImage);
-                }
-                NativeImage nativeImage = this.toNativeImage(bufferedImage);
-                Identifier Identifier2 = Identifier.of((String)"musheor", (String)("pearl_skin_" + string.toLowerCase()));
+                boolean online = this.isOnSameServer(playerName);
+                if (!online) img = this.toGrayscale(img);
+                NativeImage nativeImage = this.toNativeImage(img);
+                Identifier id = Identifier.of("musheor", "pearl_skin_" + playerName.toLowerCase());
                 this.mc.execute(() -> {
-                    VersionHelper.get().registerSkinTexture(nativeImage, string, Identifier2);
-                    this.skinTextureMap.put(string, Identifier2);
-                    this.loadingSkins.remove(string);
+                    VersionHelper.get().registerSkinTexture(nativeImage, playerName, id);
+                    this.skinTextures.put(playerName, id);
+                    this.skinFetchInProgress.remove(playerName);
                 });
-            }
-            catch (Exception exception) {
-                this.loadingSkins.remove(string);
+            } catch (Exception e) {
+                this.skinFetchInProgress.remove(playerName);
             }
         });
         thread.setDaemon(true);
         thread.start();
     }
 
-    /** Returns true if the given player name is on the same server as the local player. */
-    private boolean isOnSameServer(String string) { // was: BX92A0OIIvD9
-        return VersionHelper.get().onSameServer(string);
+    private boolean isOnSameServer(String playerName) { // was: Q90GLXQ0Pef(String)
+        return VersionHelper.get().onSameServer(playerName);
     }
 
-    /** Converts a BufferedImage to grayscale (used for offline/unknown players). */
-    private BufferedImage toGrayscale(BufferedImage bufferedImage) { // was: jOdDDFXSeWl4(BufferedImage)
-        BufferedImage bufferedImage2 = new BufferedImage(bufferedImage.getWidth(), bufferedImage.getHeight(), 2);
-        for (int i = 0; i < bufferedImage.getWidth(); ++i) {
-            for (int j = 0; j < bufferedImage.getHeight(); ++j) {
-                int n = bufferedImage.getRGB(i, j);
-                int n2 = n >> 24 & 0xFF;
-                int n3 = n >> 16 & 0xFF;
-                int n4 = n >> 8 & 0xFF;
-                int n5 = n & 0xFF;
-                int n6 = (int)(0.299 * (double)n3 + 0.587 * (double)n4 + 0.114 * (double)n5);
-                bufferedImage2.setRGB(i, j, n2 << 24 | n6 << 16 | n6 << 8 | n6);
+    /** Converts an image to greyscale (used for offline players). */
+    private BufferedImage toGrayscale(BufferedImage img) { // was: FvaNWO(BufferedImage)
+        BufferedImage gray = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        for (int x = 0; x < img.getWidth(); x++) {
+            for (int y = 0; y < img.getHeight(); y++) {
+                int argb = img.getRGB(x, y);
+                int a = argb >> 24 & 0xFF;
+                int r = argb >> 16 & 0xFF;
+                int g = argb >> 8 & 0xFF;
+                int b = argb & 0xFF;
+                int lum = (int) (0.299 * r + 0.587 * g + 0.114 * b);
+                gray.setRGB(x, y, a << 24 | lum << 16 | lum << 8 | lum);
             }
         }
-        return bufferedImage2;
+        return gray;
     }
 
-    /** Converts a BufferedImage to a NativeImage for registration as a texture. */
-    private NativeImage toNativeImage(BufferedImage bufferedImage) { // was: mp3zoXQFKUKYj5(BufferedImage)
-        NativeImage nativeImage = new NativeImage(bufferedImage.getWidth(), bufferedImage.getHeight(), false);
-        for (int i = 0; i < bufferedImage.getWidth(); ++i) {
-            for (int j = 0; j < bufferedImage.getHeight(); ++j) {
-                nativeImage.setColorArgb(i, j, bufferedImage.getRGB(i, j));
+    private NativeImage toNativeImage(BufferedImage img) { // was: Q90GLXQ0Pef(BufferedImage)
+        NativeImage nativeImage = new NativeImage(img.getWidth(), img.getHeight(), false);
+        for (int x = 0; x < img.getWidth(); x++) {
+            for (int y = 0; y < img.getHeight(); y++) {
+                nativeImage.setColorArgb(x, y, img.getRGB(x, y));
             }
         }
         return nativeImage;
     }
 
-    /** Draws a rounded outline rectangle with gradient color from n to n2. */
-    private void drawRoundedOutline(float f, float f2, float f3, float f4, float f5, int n, int n2) { // was: jOdDDFXSeWl4(float,float,float,float,float,int,int)
-        if (f5 < 0.0f) {
-            f5 = 0.0f;
-        }
-        int n3 = 10;
-        float[][] fArrayArray = new float[][]{{f + f5, f2 + f5}, {f + f3 - f5, f2 + f5}, {f + f3 - f5, f2 + f4 - f5}, {f + f5, f2 + f4 - f5}};
-        double[] dArray = new double[]{Math.PI, 4.71238898038469, 0.0, 1.5707963267948966};
+    /** Draws a rounded (possibly gradient) outline rectangle. */
+    private void drawRoundedOutline(float x, float y, float w, float h, float r, int colA, int colB) { // was: FvaNWO(float x6)
+        if (r < 0.0F) r = 0.0F;
+        int n = 10;
+        float[][] ctr = {{x + r, y + r}, {x + w - r, y + r}, {x + w - r, y + h - r}, {x + r, y + h - r}};
+        double[] arcStart = {Math.PI, Math.PI * 3.0 / 2.0, 0.0, Math.PI / 2};
         Renderer2D.COLOR.begin();
-        float f6 = 0.0f;
-        float f7 = 0.0f;
-        boolean bl = true;
-        for (int i = 0; i < 4; ++i) {
-            float f8;
-            float f9;
-            int n4;
-            for (n4 = 0; n4 <= n3; ++n4) {
-                double d = dArray[i] + (double)n4 * 1.5707963267948966 / (double)n3;
-                f9 = fArrayArray[i][0] + (float)(Math.cos(d) * (double)f5);
-                f8 = fArrayArray[i][1] + (float)(Math.sin(d) * (double)f5);
-                if (!bl) {
-                    this.drawOutlineSegment(f6, f7, f9, f8, f, f3, n, n2);
-                }
-                bl = false;
-                f6 = f9;
-                f7 = f8;
+        float prevX = 0.0F;
+        float prevY = 0.0F;
+        boolean first = true;
+        for (int c = 0; c < 4; c++) {
+            for (int i = 0; i <= n; i++) {
+                double a = arcStart[c] + i * (Math.PI / 2) / n;
+                float vx = ctr[c][0] + (float) (Math.cos(a) * r);
+                float vy = ctr[c][1] + (float) (Math.sin(a) * r);
+                if (!first) this.drawGradientLine(prevX, prevY, vx, vy, x, w, colA, colB);
+                first = false;
+                prevX = vx;
+                prevY = vy;
             }
-            n4 = (i + 1) % 4;
-            float f10 = fArrayArray[n4][0] + (float)(Math.cos(dArray[n4]) * (double)f5);
-            float f11 = fArrayArray[n4][1] + (float)(Math.sin(dArray[n4]) * (double)f5);
-            f9 = (f10 - f6) / (float)n3;
-            f8 = (f11 - f7) / (float)n3;
-            for (int j = 0; j < n3; ++j) {
-                float f12 = f6 + f9;
-                float f13 = f7 + f8;
-                this.drawOutlineSegment(f6, f7, f12, f13, f, f3, n, n2);
-                f6 = f12;
-                f7 = f13;
+            int nextC = (c + 1) % 4;
+            float ex = ctr[nextC][0] + (float) (Math.cos(arcStart[nextC]) * r);
+            float ey = ctr[nextC][1] + (float) (Math.sin(arcStart[nextC]) * r);
+            float dx = (ex - prevX) / n;
+            float dy = (ey - prevY) / n;
+            for (int i = 0; i < n; i++) {
+                float nx = prevX + dx;
+                float ny = prevY + dy;
+                this.drawGradientLine(prevX, prevY, nx, ny, x, w, colA, colB);
+                prevX = nx;
+                prevY = ny;
             }
         }
         VersionHelper.get().renderColorRenderer();
     }
 
-    /** Draws a single outline segment with interpolated gradient color. */
-    private void drawOutlineSegment(float f, float f2, float f3, float f4, float f5, float f6, int n, int n2) { // was: jOdDDFXSeWl4(float,float,float,float,float,float,int,int)
-        float f7 = Math.max(0.0f, Math.min(1.0f, ((f + f3) / 2.0f - f5) / f6));
-        int n3 = TagUtils.jOdDDFXSeWl4(n, n2, f7);
-        Renderer2D.COLOR.line((double)f, (double)f2, (double)f3, (double)f4, (meteordevelopment.meteorclient.utils.render.color.Color)new SettingColor(n3 >> 16 & 0xFF, n3 >> 8 & 0xFF, n3 & 0xFF, 255));
+    /** Draws a line segment whose colour is interpolated across the box width. */
+    private void drawGradientLine(float x1, float y1, float x2, float y2, float bx, float bw, int colA, int colB) { // was: FvaNWO(float x8)
+        float t = Math.max(0.0F, Math.min(1.0F, ((x1 + x2) / 2.0F - bx) / bw));
+        int col = TagUtils.lerpColor(colA, colB, t);
+        Renderer2D.COLOR.line(x1, y1, x2, y2, new SettingColor(col >> 16 & 0xFF, col >> 8 & 0xFF, col & 0xFF, 255));
     }
 
-    /** Renders a string with a left-to-right gradient between two colors. */
-    private void renderGradientText(TextRenderer textRenderer, String string, float f, float f2, SettingColor settingColor, SettingColor settingColor2) { // was: jOdDDFXSeWl4(TextRenderer,String,float,float,SettingColor,SettingColor)
-        float f3 = f;
-        float f4 = (float)textRenderer.getWidth(string);
-        for (int i = 0; i < string.length(); ++i) {
-            String string2 = String.valueOf(string.charAt(i));
-            float f5 = f4 > 0.0f ? (f3 - f) / f4 : 0.0f;
-            int n = TagUtils.jOdDDFXSeWl4(this.toColorInt(settingColor), this.toColorInt(settingColor2), f5);
-            SettingColor settingColor3 = new SettingColor(n >> 16 & 0xFF, n >> 8 & 0xFF, n & 0xFF, 255);
-            textRenderer.render(string2, (double)f3, (double)f2, (meteordevelopment.meteorclient.utils.render.color.Color)settingColor3);
-            f3 += (float)textRenderer.getWidth(string2);
-        }
-    }
-
-    /** Packs a SettingColor into an RGB int. */
-    private int toColorInt(SettingColor settingColor) { // was: jOdDDFXSeWl4(SettingColor)
-        return settingColor.r << 16 | settingColor.g << 8 | settingColor.b;
-    }
-
-    static final class NameColorType
-    extends Enum<NameColorType> {
-        public static final /* enum */ NameColorType Default = new NameColorType();  // was: YqwfVX
-        public static final /* enum */ NameColorType Custom = new NameColorType();   // was: TQkkPszTZ
-        public static final /* enum */ NameColorType Gradient = new NameColorType(); // was: Mz2EP5
-        private static final /* synthetic */ NameColorType[] $VALUES;
-
-        public static NameColorType[] values() {
-            return (NameColorType[])$VALUES.clone();
-        }
-
-        public static NameColorType valueOf(String string) {
-            return Enum.valueOf(NameColorType.class, string);
-        }
-
-        private static /* synthetic */ NameColorType[] $values() {
-            return new NameColorType[]{Default, Custom, Gradient};
-        }
-
-        static {
-            $VALUES = NameColorType.$values();
+    /** Renders text with a per-character horizontal colour gradient. */
+    private void renderGradientText(TextRenderer tr, String text, float x, float y, SettingColor start, SettingColor end) { // was: FvaNWO(TextRenderer,...)
+        float cursor = x;
+        float totalW = (float) tr.getWidth(text);
+        for (int i = 0; i < text.length(); i++) {
+            String ch = String.valueOf(text.charAt(i));
+            float t = totalW > 0.0F ? (cursor - x) / totalW : 0.0F;
+            int col = TagUtils.lerpColor(this.toRgb(start), this.toRgb(end), t);
+            SettingColor c = new SettingColor(col >> 16 & 0xFF, col >> 8 & 0xFF, col & 0xFF, 255);
+            tr.render(ch, cursor, y, c);
+            cursor += (float) tr.getWidth(ch);
         }
     }
 
-    static final class OutlineType
-    extends Enum<OutlineType> {
-        public static final /* enum */ OutlineType None = new OutlineType();     // was: Tz7qNAG6
-        public static final /* enum */ OutlineType Solid = new OutlineType();    // was: yQzOzveN8BjKJN5
-        public static final /* enum */ OutlineType Gradient = new OutlineType(); // was: merMGMToO0ZYtkEn
-        private static final /* synthetic */ OutlineType[] $VALUES;
-
-        public static OutlineType[] values() {
-            return (OutlineType[])$VALUES.clone();
-        }
-
-        public static OutlineType valueOf(String string) {
-            return Enum.valueOf(OutlineType.class, string);
-        }
-
-        private static /* synthetic */ OutlineType[] $values() {
-            return new OutlineType[]{None, Solid, Gradient};
-        }
-
-        static {
-            $VALUES = OutlineType.$values();
-        }
+    private int toRgb(SettingColor c) { // was: FvaNWO(SettingColor)
+        return c.r << 16 | c.g << 8 | c.b;
     }
 
-    static final class DistanceType
-    extends Enum<DistanceType> {
-        public static final /* enum */ DistanceType None = new DistanceType();    // was: J9PESj
-        public static final /* enum */ DistanceType Custom = new DistanceType();  // was: IQLoNzzVjej0Fh
-        public static final /* enum */ DistanceType Colored = new DistanceType(); // was: xf86w8EXQDMegty
-        private static final /* synthetic */ DistanceType[] $VALUES;
+    /** How the player's name is coloured. */ // was: enum NameColorType {FvaNWO, Q90GLXQ0Pef, psJq59YIbp3Z}
+    private enum NameColorType { DEFAULT, CUSTOM, GRADIENT }
 
-        public static DistanceType[] values() {
-            return (DistanceType[])$VALUES.clone();
-        }
+    /** Nametag outline style. */ // was: enum OutlineType {FvaNWO, Q90GLXQ0Pef, psJq59YIbp3Z}
+    private enum OutlineType { OFF, SOLID, GRADIENT }
 
-        public static DistanceType valueOf(String string) {
-            return Enum.valueOf(DistanceType.class, string);
-        }
+    /** How the distance readout is coloured. */ // was: enum DistanceType {FvaNWO, Q90GLXQ0Pef, psJq59YIbp3Z}
+    private enum DistanceType { OFF, CUSTOM, DISTANCE_BASED }
 
-        private static /* synthetic */ DistanceType[] $values() {
-            return new DistanceType[]{None, Custom, Colored};
-        }
+    /** Which pearls to ESP-render. */ // was: enum PearlRenderingType {FvaNWO, Q90GLXQ0Pef, psJq59YIbp3Z}
+    private enum PearlRenderingType { OFF, ASSIGNED_ONLY, ALL }
 
-        static {
-            $VALUES = DistanceType.$values();
-        }
-    }
-
-    static final class PearlRenderingType
-    extends Enum<PearlRenderingType> {
-        public static final /* enum */ PearlRenderingType None = new PearlRenderingType();     // was: gaJr0zjHBLiO
-        public static final /* enum */ PearlRenderingType Assigned = new PearlRenderingType(); // was: MCTY8c
-        public static final /* enum */ PearlRenderingType All = new PearlRenderingType();      // was: qy8UwM99rVr
-        private static final /* synthetic */ PearlRenderingType[] $VALUES;
-
-        public static PearlRenderingType[] values() {
-            return (PearlRenderingType[])$VALUES.clone();
-        }
-
-        public static PearlRenderingType valueOf(String string) {
-            return Enum.valueOf(PearlRenderingType.class, string);
-        }
-
-        private static /* synthetic */ PearlRenderingType[] $values() {
-            return new PearlRenderingType[]{None, Assigned, All};
-        }
-
-        static {
-            $VALUES = PearlRenderingType.$values();
-        }
-    }
-
-    static final class TagDisplayType
-    extends Enum<TagDisplayType> {
-        public static final /* enum */ TagDisplayType None = new TagDisplayType();
-        public static final /* enum */ TagDisplayType NameOnly = new TagDisplayType();
-        public static final /* enum */ TagDisplayType SkinOnly = new TagDisplayType();
-        public static final /* enum */ TagDisplayType NameAndSkin = new TagDisplayType();
-        private static final /* synthetic */ TagDisplayType[] $VALUES;
-
-        public static TagDisplayType[] values() {
-            return (TagDisplayType[])$VALUES.clone();
-        }
-
-        public static TagDisplayType valueOf(String string) {
-            return Enum.valueOf(TagDisplayType.class, string);
-        }
-
-        private static /* synthetic */ TagDisplayType[] $values() {
-            return new TagDisplayType[]{None, NameOnly, SkinOnly, NameAndSkin};
-        }
-
-        static {
-            $VALUES = TagDisplayType.$values();
-        }
-    }
+    /** What to show above a pearl. */ // was: enum TagDisplayType {FvaNWO, Q90GLXQ0Pef, psJq59YIbp3Z, SOYyh5IPg26f7F}
+    private enum TagDisplayType { OFF, NAME, SKIN, BOTH }
 }

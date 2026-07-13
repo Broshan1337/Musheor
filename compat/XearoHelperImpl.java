@@ -1,12 +1,12 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// Class/members readable; only Minecraft class refs were intermediary.
 package musheor.compat;
 
 import java.util.Comparator;
 import java.util.List;
-import musheor.compat.XearoHelper;
 import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.util.math.Vec3d;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.util.math.Vec3d;
 import xaero.common.minimap.waypoints.Waypoint;
 import xaero.hud.minimap.BuiltInHudModules;
 import xaero.hud.minimap.module.MinimapSession;
@@ -19,59 +19,53 @@ import xaeroplus.feature.render.DrawFeatureFactory;
 import xaeroplus.feature.render.line.Line;
 import xaeroplus.feature.waypoint.eta.WaypointEtaManager;
 
-public class XearoHelperImpl
-implements XearoHelper {
+/**
+ * The active {@link XearoHelper} — bridges directly to Xaero's Minimap (and XaeroPlus for
+ * map lines / ETA). Installed only when Xaero is present.
+ */
+public class XearoHelperImpl implements XearoHelper {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
-    private XearoHelper.WaypointData lastEtaData = null;
+    private WaypointData lastEtaData = null;
     private Waypoint lastEtaWaypoint = null;
 
     private WaypointSet currentSet() {
-        MinimapSession minimapSession = (MinimapSession)BuiltInHudModules.MINIMAP.getCurrentSession();
-        if (minimapSession == null) {
-            return null;
-        }
-        MinimapWorld minimapWorld = minimapSession.getWorldManager().getCurrentWorld();
-        if (minimapWorld == null) {
-            return null;
-        }
-        return minimapWorld.getCurrentWaypointSet();
+        MinimapSession session = BuiltInHudModules.MINIMAP.getCurrentSession();
+        if (session == null) return null;
+        MinimapWorld world = session.getWorldManager().getCurrentWorld();
+        return world == null ? null : world.getCurrentWaypointSet();
     }
 
     private void refresh() {
-        if (XearoHelperImpl.mc.player == null || XearoHelperImpl.mc.world == null) {
-            return;
+        if (mc.player != null && mc.world != null) {
+            SupportMods.xaeroMinimap.requestWaypointsRefresh();
         }
-        SupportMods.xaeroMinimap.requestWaypointsRefresh();
     }
 
-    private static XearoHelper.WaypointData wrap(Waypoint waypoint) {
-        return new XearoHelper.WaypointData(waypoint.getX(), waypoint.getY(), waypoint.getZ(), waypoint.getName(), waypoint.isTemporary(), waypoint.getCreatedAt());
+    private static WaypointData wrap(Waypoint wp) {
+        return new WaypointData(wp.getX(), wp.getY(), wp.getZ(), wp.getName(), wp.isTemporary(), wp.getCreatedAt());
     }
 
-    private static WaypointColor xaeroColor(XearoHelper.WaypointColorHint waypointColorHint) {
-        return switch (waypointColorHint) {
-            default -> throw new MatchException(null, null);
-            case XearoHelper.WaypointColorHint.WHITE -> WaypointColor.WHITE;
-            case XearoHelper.WaypointColorHint.RED -> WaypointColor.RED;
-            case XearoHelper.WaypointColorHint.GOLD -> WaypointColor.GOLD;
-            case XearoHelper.WaypointColorHint.BLUE -> WaypointColor.BLUE;
+    private static WaypointColor xaeroColor(WaypointColorHint hint) {
+        return switch (hint) {
+            case WHITE -> WaypointColor.WHITE;
+            case RED -> WaypointColor.RED;
+            case GOLD -> WaypointColor.GOLD;
+            case BLUE -> WaypointColor.BLUE;
         };
     }
 
     @Override
-    public List<XearoHelper.WaypointData> getWaypoints(boolean bl) {
-        WaypointSet waypointSet = this.currentSet();
-        if (waypointSet == null) {
-            return List.of();
-        }
-        List<Waypoint> list = (List<Waypoint>)waypointSet.getWaypoints();
-        List<Waypoint> list2 = bl ? list.stream().filter(Waypoint::isTemporary).toList() : list;
-        return list2.stream().map(XearoHelperImpl::wrap).toList();
+    public List<WaypointData> getWaypoints(boolean tempOnly) {
+        WaypointSet set = this.currentSet();
+        if (set == null) return List.of();
+        List<Waypoint> list = (List<Waypoint>) set.getWaypoints();
+        List<Waypoint> filtered = tempOnly ? list.stream().filter(Waypoint::isTemporary).toList() : list;
+        return filtered.stream().map(XearoHelperImpl::wrap).toList();
     }
 
     @Override
-    public XearoHelper.WaypointData getOldestWaypoint(boolean bl) {
-        return this.getWaypoints(bl).stream().min(Comparator.comparingLong(XearoHelper.WaypointData::createdAt)).orElse(null);
+    public WaypointData getOldestWaypoint(boolean tempOnly) {
+        return this.getWaypoints(tempOnly).stream().min(Comparator.comparingLong(WaypointData::createdAt)).orElse(null);
     }
 
     @Override
@@ -80,76 +74,56 @@ implements XearoHelper {
     }
 
     @Override
-    public void setWaypointSet(String string) {
-        MinimapSession minimapSession = (MinimapSession)BuiltInHudModules.MINIMAP.getCurrentSession();
-        if (minimapSession == null) {
-            return;
-        }
-        MinimapWorld minimapWorld = minimapSession.getWorldManager().getCurrentWorld();
-        if (minimapWorld == null) {
-            return;
-        }
-        if (minimapWorld.getWaypointSet(string) == null) {
-            minimapWorld.addWaypointSet(string);
-        }
-        minimapWorld.setCurrentWaypointSetId(string);
+    public void setWaypointSet(String name) {
+        MinimapSession session = BuiltInHudModules.MINIMAP.getCurrentSession();
+        if (session == null) return;
+        MinimapWorld world = session.getWorldManager().getCurrentWorld();
+        if (world == null) return;
+        if (world.getWaypointSet(name) == null) world.addWaypointSet(name);
+        world.setCurrentWaypointSetId(name);
     }
 
     @Override
-    public void restoreWaypointSet(Object object) {
-        if (object == null) {
-            return;
-        }
-        WaypointSet waypointSet = (WaypointSet)object;
-        MinimapSession minimapSession = (MinimapSession)BuiltInHudModules.MINIMAP.getCurrentSession();
-        if (minimapSession == null) {
-            return;
-        }
-        MinimapWorld minimapWorld = minimapSession.getWorldManager().getCurrentWorld();
-        if (minimapWorld == null) {
-            return;
-        }
-        minimapWorld.setCurrentWaypointSetId(waypointSet.getName());
+    public void restoreWaypointSet(Object handle) {
+        if (handle == null) return;
+        WaypointSet set = (WaypointSet) handle;
+        MinimapSession session = BuiltInHudModules.MINIMAP.getCurrentSession();
+        if (session == null) return;
+        MinimapWorld world = session.getWorldManager().getCurrentWorld();
+        if (world != null) world.setCurrentWaypointSetId(set.getName());
     }
 
     @Override
-    public void addWaypointToCurrent(String string, String string2, Vec3d Vec3d2, XearoHelper.WaypointColorHint waypointColorHint) {
-        this.addWaypointToCurrent(string, string2, Vec3d2, waypointColorHint, false);
+    public void addWaypointToCurrent(String name, String initial, Vec3d pos, WaypointColorHint colorHint) {
+        this.addWaypointToCurrent(name, initial, pos, colorHint, false);
     }
 
     @Override
-    public void addWaypointToCurrent(String string, String string2, Vec3d Vec3d2, XearoHelper.WaypointColorHint waypointColorHint, boolean bl) {
-        WaypointSet waypointSet = this.currentSet();
-        if (waypointSet == null) {
-            return;
-        }
-        Waypoint waypoint = new Waypoint((int)Vec3d2.x, (int)Vec3d2.y, (int)Vec3d2.z, string, string2, XearoHelperImpl.xaeroColor(waypointColorHint));
-        waypoint.setTemporary(bl);
-        waypointSet.add(waypoint);
+    public void addWaypointToCurrent(String name, String initial, Vec3d pos, WaypointColorHint colorHint, boolean temporary) {
+        WaypointSet set = this.currentSet();
+        if (set == null) return;
+        Waypoint waypoint = new Waypoint((int) pos.x, (int) pos.y, (int) pos.z, name, initial, xaeroColor(colorHint));
+        waypoint.setTemporary(temporary);
+        set.add(waypoint);
         this.refresh();
     }
 
     @Override
-    public void deleteCurrentWaypoint(XearoHelper.WaypointData waypointData) {
-        WaypointSet waypointSet = this.currentSet();
-        if (waypointSet == null) {
-            return;
-        }
-        List list = (List)waypointSet.getWaypoints();
-        list.stream().filter(waypoint -> waypoint.getX() == waypointData.x() && waypoint.getZ() == waypointData.z() && waypoint.getCreatedAt() == waypointData.createdAt()).findFirst().ifPresent(waypoint -> {
-            waypointSet.remove(waypoint);
+    public void deleteCurrentWaypoint(WaypointData data) {
+        WaypointSet set = this.currentSet();
+        if (set == null) return;
+        List<Waypoint> list = (List<Waypoint>) set.getWaypoints();
+        list.stream().filter(wp -> wp.getX() == data.x() && wp.getZ() == data.z() && wp.getCreatedAt() == data.createdAt()).findFirst().ifPresent(wp -> {
+            set.remove(wp);
             this.refresh();
         });
     }
 
     @Override
     public void deleteAllTempWaypoints() {
-        WaypointSet waypointSet = this.currentSet();
-        if (waypointSet == null) {
-            return;
-        }
-        List list = (List)waypointSet.getWaypoints();
-        list.removeIf(Waypoint::isTemporary);
+        WaypointSet set = this.currentSet();
+        if (set == null) return;
+        ((List<Waypoint>) set.getWaypoints()).removeIf(Waypoint::isTemporary);
         this.refresh();
     }
 
@@ -159,18 +133,16 @@ implements XearoHelper {
     }
 
     @Override
-    public void drawLinesOnMap(List<XearoHelper.LineData> list, int n) {
-        this.drawLinesOnMap("Path", list, n);
+    public void drawLinesOnMap(List<LineData> lines, int color) {
+        this.drawLinesOnMap("Path", lines, color);
     }
 
     @Override
-    public void drawLinesOnMap(String string, List<XearoHelper.LineData> list, int n4) {
-        if (!FabricLoader.getInstance().isModLoaded("xaeroplus")) {
-            return;
-        }
-        List<Line> list2 = list.stream().map(lineData -> new Line(lineData.x1(), lineData.z1(), lineData.x2(), lineData.z2())).toList();
-        Globals.drawManager.registry().unregister(string);
-        Globals.drawManager.registry().register(DrawFeatureFactory.lines((String)string, (n, n2, n3, ignored) -> list2, () -> n4, () -> 1.0f, (int)50));
+    public void drawLinesOnMap(String key, List<LineData> lines, int color) {
+        if (!FabricLoader.getInstance().isModLoaded("xaeroplus")) return;
+        List<Line> xaeroLines = lines.stream().map(l -> new Line(l.x1(), l.z1(), l.x2(), l.z2())).toList();
+        Globals.drawManager.registry().unregister(key);
+        Globals.drawManager.registry().register(DrawFeatureFactory.lines(key, (cx, cz, zoom, dim) -> xaeroLines, () -> color, () -> 1.0F, 50));
     }
 
     @Override
@@ -179,33 +151,27 @@ implements XearoHelper {
     }
 
     @Override
-    public void clearLinesOnMap(String string) {
-        if (!FabricLoader.getInstance().isModLoaded("xaeroplus")) {
-            return;
+    public void clearLinesOnMap(String key) {
+        if (FabricLoader.getInstance().isModLoaded("xaeroplus")) {
+            Globals.drawManager.registry().unregister(key);
         }
-        Globals.drawManager.registry().unregister(string);
     }
 
     @Override
-    public double distanceToWaypoint(XearoHelper.WaypointData waypointData) {
-        if (XearoHelperImpl.mc.player == null) {
-            return Double.MAX_VALUE;
-        }
-        double d = XearoHelperImpl.mc.player.getX() - (double)waypointData.x();
-        double d2 = XearoHelperImpl.mc.player.getZ() - (double)waypointData.z();
-        return Math.sqrt(d * d + d2 * d2);
+    public double distanceToWaypoint(WaypointData waypoint) {
+        if (mc.player == null) return Double.MAX_VALUE;
+        double dx = mc.player.getX() - waypoint.x();
+        double dz = mc.player.getZ() - waypoint.z();
+        return Math.sqrt(dx * dx + dz * dz);
     }
 
     @Override
-    public String getEtaSuffix(XearoHelper.WaypointData waypointData) {
-        if (!FabricLoader.getInstance().isModLoaded("xaeroplus")) {
-            return null;
-        }
-        if (!waypointData.equals(this.lastEtaData)) {
-            this.lastEtaData = waypointData;
-            this.lastEtaWaypoint = new Waypoint(waypointData.x(), waypointData.y(), waypointData.z(), waypointData.name(), "W", WaypointColor.WHITE);
+    public String getEtaSuffix(WaypointData waypoint) {
+        if (!FabricLoader.getInstance().isModLoaded("xaeroplus")) return null;
+        if (!waypoint.equals(this.lastEtaData)) {
+            this.lastEtaData = waypoint;
+            this.lastEtaWaypoint = new Waypoint(waypoint.x(), waypoint.y(), waypoint.z(), waypoint.name(), "W", WaypointColor.WHITE);
         }
         return WaypointEtaManager.INSTANCE.getEtaTextSuffix(this.lastEtaWaypoint);
     }
 }
-

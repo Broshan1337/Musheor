@@ -1,4 +1,5 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// (source class was obfuscated as obf.SDNZCBI)
 package musheor.commands;
 
 import com.mojang.brigadier.arguments.ArgumentType;
@@ -54,7 +55,7 @@ public class FolderCommand extends Command {
     }
 
     /** Launches Windows Explorer at the given directory path. */
-    private void openFolder(File folder) { // was: jOdDDFXSeWl4(File)
+    private void openFolder(File folder) { // was: FvaNWO(File)
         try {
             new ProcessBuilder("explorer.exe", folder.getAbsolutePath()).start();
         } catch (IOException e) {

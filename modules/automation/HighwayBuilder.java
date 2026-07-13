@@ -1,8 +1,11 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// Class name was already readable; internal members were obfuscated.
 package musheor.modules.automation;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -14,7 +17,6 @@ import meteordevelopment.meteorclient.settings.Setting;
 import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
-import meteordevelopment.meteorclient.systems.modules.combat.AutoTotem;
 import meteordevelopment.meteorclient.systems.modules.combat.KillAura;
 import meteordevelopment.meteorclient.systems.modules.movement.AutoWalk;
 import meteordevelopment.meteorclient.systems.modules.player.AutoEat;
@@ -22,634 +24,502 @@ import meteordevelopment.meteorclient.systems.modules.player.AutoGap;
 import meteordevelopment.meteorclient.systems.modules.render.FreeLook;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
-import musheor.modules.automation.EchestFarmer;
-import musheor.modules.automation.HotbarReplenish;
-import musheor.modules.automation.InventoryCleaner;
-import musheor.modules.automation.KekNuker;
-import musheor.modules.automation.SourceRemover;
 import musheor.musheor;
+import musheor.compat.VersionHelper;
 import musheor.utils.BlockPositions;
 import musheor.utils.DiscordRPC;
 import musheor.utils.Handlers;
-import musheor.utils.InventoryManager;
 import musheor.utils.PlayerUtils;
 import musheor.utils.RenderUtils;
-import musheor.utils.StatsHandler;
+import musheor.utils.StatsCollector;
 import musheor.utils.WorldUtils;
+import musheor.utils.internal.HighwayLocator;
 import musheor.utils.internal.HighwayState;
 import musheor.utils.internal.PathingHelper;
 import musheor.utils.system.MusheorSystem;
-import net.minecraft.ItemStack;
-import net.minecraft.Items;
-import net.minecraft.Blocks;
-import net.minecraft.Block;
-import net.minecraft.BlockPos;
-import net.minecraft.SuspiciousStewItem;
-import net.minecraft.BlockState;
-import net.minecraft.MinecraftClient;
+import net.minecraft.block.Block;
+import net.minecraft.block.Blocks;
+import net.minecraft.block.ShulkerBoxBlock;
+import net.minecraft.block.BlockState;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.component.DataComponentTypes;
-import net.minecraft.item.SuspiciousStewItem;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
+import net.minecraft.util.math.BlockPos;
 
-public class HighwayBuilder
-extends Module {
-    private final MinecraftClient mc = MinecraftClient.getInstance();
-    private final SettingGroup sgGeneral = this.settings.getDefaultGroup();
-    private final SettingGroup sgPlacement = this.settings.createGroup("Placement");
-    private final SettingGroup sgRestocking = this.settings.createGroup("Restocking");
-    private final SettingGroup sgAutoEat = this.settings.createGroup("Auto Eat");
-    private final SettingGroup sgNuker = this.settings.createGroup("Nuker");
-    private final SettingGroup sgKillAura = this.settings.createGroup("Kill Aura");
-    private final SettingGroup sgSafety = this.settings.createGroup("Safety");
-    private final SettingGroup sgInventory = this.settings.createGroup("Inventory");
-    private final SettingGroup sgMisc = this.settings.createGroup("Miscellaneous");
-    private final Setting<BuildMode> buildMode = this.sgGeneral.add((Setting)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)new EnumSetting.Builder().name("build-mode")).description("Pave mode places blocks - Dig mode digs tunnels.")).defaultValue((Object)BuildMode.Pave)).build());
-    public final Setting<Mode> mode = this.sgGeneral.add((Setting)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)new EnumSetting.Builder().name("mode")).description("Handle walking and aligning automatically or ignore in manual mode")).defaultValue((Object)Mode.Auto)).build());
-    private final Setting<HighwayType> highwayType = this.sgGeneral.add((Setting)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)new EnumSetting.Builder().name("highway-type")).description("Cardinal or diagonal highway type.")).defaultValue((Object)HighwayType.Cardinal)).build());
-    private final Setting<Integer> pavementWidth = this.sgGeneral.add((Setting)((IntSetting.Builder)((IntSetting.Builder)((IntSetting.Builder)new IntSetting.Builder().name("pavement-width")).description("Width of the pavement below the player's feet.")).defaultValue((Object)4)).sliderRange(3, 9).build());
-    private final Setting<Block> pavementBlock = this.sgPlacement.add((Setting)((BlockSetting.Builder)((BlockSetting.Builder)((BlockSetting.Builder)((BlockSetting.Builder)new BlockSetting.Builder().name("pavement-block")).description("Block that is used to build highway pavement with.")).defaultValue((Object)Blocks.OBSIDIAN)).visible(() -> this.buildMode.get() == BuildMode.Pave)).build());
-    private final Setting<ScaffoldMode> scaffoldMode = this.sgPlacement.add((Setting)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)new EnumSetting.Builder().name("scaffold-mode")).description("What type of scaffolding to use when going over caves and open area's.")).defaultValue((Object)ScaffoldMode.GrimScaffold)).visible(() -> this.buildMode.get() == BuildMode.Dig)).build());
-    private final Setting<Block> scaffoldBlock = this.sgPlacement.add((Setting)((BlockSetting.Builder)((BlockSetting.Builder)((BlockSetting.Builder)((BlockSetting.Builder)new BlockSetting.Builder().name("scaffold-block")).description("Block that is used to fix the flooring with.")).defaultValue((Object)Blocks.NETHERRACK)).visible(() -> this.buildMode.get() == BuildMode.Dig && this.scaffoldMode.get() != ScaffoldMode.None)).build());
-    private final Setting<Boolean> scaffoldLeftRail = this.sgPlacement.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("scaffold-left-rail")).description("Places the railing on the left side of the player.")).defaultValue((Object)true)).visible(() -> this.buildMode.get() == BuildMode.Dig)).build());
-    private final Setting<Boolean> scaffoldRightRail = this.sgPlacement.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("scaffold-right-rail")).description("Places the railing on the right side of the player.")).defaultValue((Object)true)).visible(() -> this.buildMode.get() == BuildMode.Dig)).build());
-    private final Setting<Boolean> placeRails = this.sgPlacement.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("place-rails")).description("Places railings on both sides of the highway 1 block above the pavement.")).defaultValue((Object)true)).visible(() -> this.buildMode.get() == BuildMode.Pave)).build());
-    private final Setting<Boolean> placeLeftRails = this.sgPlacement.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("place-left-rail")).description("Places railings on the left side sides of the highway 1 block above the pavement.")).defaultValue((Object)true)).visible(() -> this.buildMode.get() == BuildMode.Pave && (Boolean)this.placeRails.get() != false)).build());
-    private final Setting<Boolean> placeRightRails = this.sgPlacement.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("place-right-rail")).description("Places railings on the right sides of the highway 1 block above the pavement.")).defaultValue((Object)true)).visible(() -> this.buildMode.get() == BuildMode.Pave && (Boolean)this.placeRails.get() != false)).build());
-    private final Setting<Boolean> replaceCryingObsidian = this.sgPlacement.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("replace-crying-obsidian")).description("Mines and replaces crying obsidian if part of the pavement positions.")).defaultValue((Object)false)).visible(() -> this.buildMode.get() == BuildMode.Pave)).build());
-    private final Setting<Boolean> fillCeiling = this.sgPlacement.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("fill-ceiling")).description("Fills the ceiling at Y level 123 with blocks.")).defaultValue((Object)false)).visible(() -> this.buildMode.get() == BuildMode.Pave)).build());
-    private final Setting<Boolean> allowEchestFarming = this.sgRestocking.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("echest-farming")).description("Allow the player to farm obsidian by mining enderchests.")).defaultValue((Object)true)).visible(() -> this.buildMode.get() == BuildMode.Pave && this.pavementBlock.get() == Blocks.OBSIDIAN)).build());
-    private final Setting<Boolean> allowItemRestocking = this.sgRestocking.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("item-restocking")).description("Allow the restocking process to grab items from shulkers.")).defaultValue((Object)false)).build());
-    private final Setting<Boolean> storeBrokenPickaxes = this.sgRestocking.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("store-broken-pickaxes")).description("Swaps broken pickaxes with new ones when restocking these, allowing you to repair them later.")).defaultValue((Object)true)).visible(() -> this.allowItemRestocking.get())).build());
-    private final Setting<Boolean> allowShulkerRestocking = this.sgRestocking.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("shulker-restocking")).description("Allow the restocking process to grab shulkers from the player's enderchest.")).defaultValue((Object)false)).build());
-    private final Setting<Boolean> allowEchestShulkerRestocking = this.sgRestocking.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("echest-shulker-restocking")).description("Allow the restocking process to grab echest shulkers from the player's enderchest.")).defaultValue((Object)false)).visible(() -> this.allowShulkerRestocking.get())).visible(() -> false)).build());
-    private final Setting<Boolean> allowToolShulkerRestocking = this.sgRestocking.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("tool-shulker-restocking")).description("Allow the restocking process to grab tool shulkers from the player's enderchest.")).defaultValue((Object)false)).visible(() -> this.allowShulkerRestocking.get())).build());
-    private final Setting<Boolean> autoEat = this.sgAutoEat.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("auto-eat")).description("Pauses the current task and automatically eats.")).defaultValue((Object)true)).build());
-    private final Setting<Boolean> disableAutoEat = this.sgAutoEat.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("disable-auto-eat")).description("Disables auto-eat when deactivating the paver.")).defaultValue((Object)true)).build());
-    private final Setting<Boolean> autoGap = this.sgAutoEat.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("eat-gap")).description("Allow the player to eat golden apples when required.")).defaultValue((Object)true)).visible(() -> this.autoEat.get())).build());
-    private final Setting<Boolean> disableAutoGap = this.sgAutoEat.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("disable-auto-gap")).description("Disables auto-gap when deactivating the paver.")).defaultValue((Object)true)).build());
-    private final Setting<Boolean> enableAutoTotem = this.sgSafety.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("auto-totem")).description("Enable Autototem when activating this module.")).defaultValue((Object)true)).visible(() -> this.autoGap.get())).build());
-    private final Setting<Boolean> disableAutoTotemAfterDeactivating = this.sgSafety.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("disable-auto-totem-on-toggle")).description("Disable Autototem when deactivating this module.")).defaultValue((Object)false)).build());
-    private final Setting<Boolean> enableDiscordRPC = this.sgMisc.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("discord-rpc")).description("Send paver stats to discord activity.")).defaultValue((Object)true)).build());
-    private final Setting<Boolean> enableFreeLook = this.sgMisc.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("enable-freelook")).description("Freelook when using the paver.")).defaultValue((Object)true)).build());
-    public final Setting<Boolean> enableNuker = this.sgNuker.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("enable-nuker")).description("Allows the paver to use the nuker module.")).defaultValue((Object)true)).build());
-    private final Setting<Boolean> removeBlocksAboveRails = this.sgNuker.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("mine-above-rails")).description("Removes and blocks that above the railings.")).defaultValue((Object)false)).build());
-    private final Setting<Boolean> enableKillAura = this.sgKillAura.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("kill-aura")).description("Automatically attack nearby hostile entities.")).defaultValue((Object)true)).build());
-    private final Setting<Boolean> disableKillAuraAfterDeactivating = this.sgKillAura.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("disable-kill-aura-on-toggle")).description("Disables kill aura after deactivating.")).defaultValue((Object)true)).visible(() -> this.enableKillAura.get())).build());
-    private final Setting<Boolean> isDisconnect = this.sgSafety.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("disconnect-if-no-materials")).description("Automatically disconnect when materials are low (less than 8 Obsidian/E-Chests).")).defaultValue((Object)false)).build());
-    private final Setting<Boolean> enableSourceRemover = this.sgSafety.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("source-remover")).description("Automatically remove lava sources when you can reach them.")).defaultValue((Object)false)).build());
-    private final Setting<Boolean> removeAnnoyingLava = this.sgSafety.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("advanced-source-remover")).description("Uses baritone to path to lava sources ahead of the player.")).defaultValue((Object)false)).visible(null)).build());
-    private final Setting<Boolean> autoReplenish = this.sgInventory.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("auto-replenish")).description("Automatically move items from inventory to hotbar when slots are empty.")).defaultValue((Object)true)).build());
-    private final Setting<Boolean> inventoryCleaner = this.sgInventory.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("inventory-cleaner")).description("Allow the paver to dispose of unwanted items.")).defaultValue((Object)false)).build());
-    private final Setting<Boolean> pauseOnLag = this.sgMisc.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("pause-on-lag")).description("Stops the player from paving when the server is lagging.")).defaultValue((Object)false)).build());
-    private final Setting<Integer> lagThreshold = this.sgMisc.add((Setting)((IntSetting.Builder)((IntSetting.Builder)((IntSetting.Builder)((IntSetting.Builder)new IntSetting.Builder().name("lag-threshold")).description("Lag threshold before forcing the player to pause.")).defaultValue((Object)3)).visible(() -> this.pauseOnLag.get())).build());
-    public static HighwayBuilder INSTANCE;
+/**
+ * Automated highway builder for 2b2t. Orchestrates the whole paving/digging loop:
+ * material checks, helper-module toggling (nuker/auto-eat/kill-aura/restock/echest
+ * farmer), highway detection (Auto mode), and per-tick dispatch to the pave/dig
+ * handlers in {@link Handlers}. This class is the module shell + settings + state
+ * machine; the heavy per-tick block logic lives in {@link Handlers}.
+ */
+public class HighwayBuilder extends Module {
+    private final MinecraftClient mc = MinecraftClient.getInstance(); // was: rKbT3Ifwo (field)
+
+    private final SettingGroup sgGeneral    = this.settings.getDefaultGroup();     // was: r7hOYIKN2
+    private final SettingGroup sgPlacement  = this.settings.createGroup("Placement"); // was: oZHMlTL
+    private final SettingGroup sgRestocking = this.settings.createGroup("Restocking"); // was: xQr5FhbwpQPWgIQ
+    private final SettingGroup sgAutoEat    = this.settings.createGroup("Auto Eat"); // was: OMMZL1F3q
+    private final SettingGroup sgNuker      = this.settings.createGroup("Nuker");   // was: zu3a44xDeMFMCRwm
+    private final SettingGroup sgKillAura   = this.settings.createGroup("Kill Aura"); // was: krxNb5lcQuWA
+    private final SettingGroup sgSafety     = this.settings.createGroup("Safety");  // was: nt0HZnvBBp
+    private final SettingGroup sgInventory  = this.settings.createGroup("Inventory"); // was: amz3UB1vE
+    private final SettingGroup sgMisc       = this.settings.createGroup("Miscellaneous"); // was: sBBIyQG5NWq0K
+
+    // --- General ---
+    private final Setting<BuildMode> buildMode = sgGeneral.add(new EnumSetting.Builder<BuildMode>() // was: sZkZ1izAy
+        .name("build-mode").description("Pave mode places blocks - Dig mode digs tunnels.")
+        .defaultValue(BuildMode.PAVE).build());
+    public final Setting<Mode> mode = sgGeneral.add(new EnumSetting.Builder<Mode>() // was: FvaNWO
+        .name("mode").description("Which mode to run the highwaybuilder in; Auto = fully automatic alignment, width, etc... - Semi = Chosen highway type and other parameters - Manual = full manual control")
+        .defaultValue(Mode.AUTO).build());
+    private final Setting<HighwayType> highwayType = sgGeneral.add(new EnumSetting.Builder<HighwayType>() // was: QYKUhjp
+        .name("highway-type").description("Cardinal or diagonal highway type.")
+        .defaultValue(HighwayType.CARDINAL).visible(() -> mode.get() != Mode.AUTO).build());
+    private final Setting<Integer> pavementWidth = sgGeneral.add(new IntSetting.Builder() // was: NIz4xic3Js9
+        .name("pavement-width").description("Width of the pavement below the player's feet.")
+        .defaultValue(4).sliderRange(3, 9).visible(() -> mode.get() != Mode.AUTO).build());
+    private final Setting<Boolean> autoBounce = sgGeneral.add(new BoolSetting.Builder() // was: u1WFwbQRSKa
+        .name("auto-bounce").description("Automatically start bouncing when no blockages or missing blocks can be found ahead")
+        .defaultValue(true).visible(() -> mode.get() != Mode.MANUAL).build());
+    private final Setting<Integer> bounceDistanceCheck = sgGeneral.add(new IntSetting.Builder() // was: LGDfbZq
+        .name("bounce-distance-check").description("How many blocks to scan ahead and check before allowing the paver to start bouncing")
+        .defaultValue(24).sliderRange(1, 64).visible(() -> mode.get() != Mode.MANUAL && autoBounce.get()).build());
+
+    // --- Placement ---
+    private final Setting<Block> pavementBlock = sgPlacement.add(new BlockSetting.Builder() // was: to3T8DJCDVX8po
+        .name("pavement-block").description("Block that is used to build highway pavement with.")
+        .defaultValue(Blocks.OBSIDIAN).visible(() -> buildMode.get() == BuildMode.PAVE).build());
+    private final Setting<ScaffoldMode> scaffoldMode = sgPlacement.add(new EnumSetting.Builder<ScaffoldMode>() // was: Sd3jEwKuGABy
+        .name("scaffold-mode").description("What type of scaffolding to use when going over caves and open area's.")
+        .defaultValue(ScaffoldMode.NORMAL).visible(() -> buildMode.get() == BuildMode.DIG).build());
+    private final Setting<Block> scaffoldBlock = sgPlacement.add(new BlockSetting.Builder() // was: kJfFkD47Vh
+        .name("scaffold-block").description("Block that is used to fix the flooring with.")
+        .defaultValue(Blocks.CRYING_OBSIDIAN).visible(() -> buildMode.get() == BuildMode.DIG && scaffoldMode.get() != ScaffoldMode.NONE).build());
+    private final Setting<Boolean> scaffoldLeftRail = sgPlacement.add(new BoolSetting.Builder() // was: ubHptFBRn5bO
+        .name("scaffold-left-rail").description("Places the railing on the left side of the player.")
+        .defaultValue(true).visible(() -> buildMode.get() == BuildMode.DIG).build());
+    private final Setting<Boolean> scaffoldRightRail = sgPlacement.add(new BoolSetting.Builder() // was: apOpfoOHr3fJVwT
+        .name("scaffold-right-rail").description("Places the railing on the right side of the player.")
+        .defaultValue(true).visible(() -> buildMode.get() == BuildMode.DIG).build());
+    private final Setting<Boolean> placeRails = sgPlacement.add(new BoolSetting.Builder() // was: hq1pN0qY
+        .name("place-rails").description("Places railings on both sides of the highway 1 block above the pavement.")
+        .defaultValue(true).visible(() -> buildMode.get() == BuildMode.PAVE && mode.get() != Mode.AUTO).build());
+    private final Setting<Boolean> placeLeftRail = sgPlacement.add(new BoolSetting.Builder() // was: ptxWcpd1WV763T5
+        .name("place-left-rail").description("Places railings on the left side sides of the highway 1 block above the pavement.")
+        .defaultValue(true).visible(() -> buildMode.get() == BuildMode.PAVE && placeRails.get() && mode.get() != Mode.AUTO).build());
+    private final Setting<Boolean> placeRightRail = sgPlacement.add(new BoolSetting.Builder() // was: DnAk86nuI
+        .name("place-right-rail").description("Places railings on the right sides of the highway 1 block above the pavement.")
+        .defaultValue(true).visible(() -> buildMode.get() == BuildMode.PAVE && placeRails.get() && mode.get() != Mode.AUTO).build());
+    private final Setting<Boolean> replaceCryingObsidian = sgPlacement.add(new BoolSetting.Builder() // was: LlN8EpIZKbk
+        .name("replace-crying-obsidian").description("Mines and replaces crying obsidian if part of the pavement positions.")
+        .defaultValue(false).visible(() -> buildMode.get() == BuildMode.PAVE).build());
+    private final Setting<Boolean> fillCeiling = sgPlacement.add(new BoolSetting.Builder() // was: pgjj9cLYUTE5g
+        .name("fill-ceiling").description("Fills the ceiling at Y level 123 with blocks.")
+        .defaultValue(false).visible(() -> buildMode.get() == BuildMode.PAVE).build());
+
+    // --- Restocking ---
+    private final Setting<Boolean> echestFarming = sgRestocking.add(new BoolSetting.Builder() // was: IeStEJRJ9eb3l
+        .name("echest-farming").description("Allow the player to farm obsidian by mining enderchests.")
+        .defaultValue(true).visible(() -> buildMode.get() == BuildMode.PAVE && pavementBlock.get() == Blocks.OBSIDIAN).build());
+    private final Setting<Boolean> enableItemRestocking = sgRestocking.add(new BoolSetting.Builder() // was: sFazojak6ig8QgGq
+        .name("enable-item-restocking").description("Allow the restocking process to grab items from shulkers.")
+        .defaultValue(false).build());
+    private final Setting<Boolean> swapBrokenPickaxes = sgRestocking.add(new BoolSetting.Builder() // was: ewq603nIlCd9Gbu
+        .name("swap-broken-pickaxes").description("Swaps broken pickaxes with new ones when restocking these, allowing you to repair them later.")
+        .defaultValue(true).visible(enableItemRestocking::get).build());
+    private final Setting<Boolean> shulkerRestocking = sgRestocking.add(new BoolSetting.Builder() // was: ExGM8SQ9Qni
+        .name("shulker-restocking").description("Allow the restocking process to grab shulkers from the player's enderchest.")
+        .defaultValue(false).visible(() -> false).build());
+    private final Setting<Boolean> echestShulkerRestocking = sgRestocking.add(new BoolSetting.Builder() // was: yS4isXf3gAzs
+        .name("echest-shulker-restocking").description("Allow the restocking process to grab echest shulkers from the player's enderchest.")
+        .defaultValue(false).visible(shulkerRestocking::get).build());
+    private final Setting<Boolean> toolShulkerRestocking = sgRestocking.add(new BoolSetting.Builder() // was: eC9HV2bWGX
+        .name("tool-shulker-restocking").description("Allow the restocking process to grab tool shulkers from the player's enderchest.")
+        .defaultValue(false).visible(shulkerRestocking::get).build());
+
+    // --- Auto Eat ---
+    private final Setting<Boolean> toggleAutoEat = sgAutoEat.add(new BoolSetting.Builder() // was: w9spWeVv3AvI
+        .name("toggle-auto-eat").description("Pauses the current task and automatically eats.").defaultValue(true).build());
+    private final Setting<Boolean> toggleAutoGap = sgAutoEat.add(new BoolSetting.Builder() // was: HvulV2j9tKjohNgh
+        .name("toggle-auto-gap").description("Allow the player to eat golden apples when required").defaultValue(true).build());
+
+    // --- Nuker ---
+    public final Setting<Boolean> toggleKekNuker = sgNuker.add(new BoolSetting.Builder() // was: Q90GLXQ0Pef
+        .name("toggle-kek-nuker").description("Allows the paver to use the nuker module.").defaultValue(true).build());
+    private final Setting<Boolean> mineAboveRails = sgNuker.add(new BoolSetting.Builder() // was: Qco5OF
+        .name("mine-above-rails").description("Cleans and removes blocks above rails").defaultValue(false).build());
+
+    // --- Kill Aura ---
+    private final Setting<Boolean> toggleKillAura = sgKillAura.add(new BoolSetting.Builder() // was: cgqo7J5iR6
+        .name("toggle-kill-aura").description("Automatically attack nearby hostile entities.").defaultValue(false).build());
+
+    // --- Safety ---
+    private final Setting<Boolean> disconnectIfNoMaterials = sgSafety.add(new BoolSetting.Builder() // was: u2kcN4vsQhS46w5s
+        .name("disconnect-if-no-materials").description("Automatically disconnect when materials are low (less than 8 Obsidian/E-Chests).").defaultValue(false).build());
+    private final Setting<Boolean> toggleSourceFiller = sgSafety.add(new BoolSetting.Builder() // was: Eos3LxdhEJt
+        .name("toggle-source-filler").description("Automatically remove lava sources when you can reach them.").defaultValue(true).build());
+    private final Setting<Boolean> advancedSourceFiller = sgSafety.add(new BoolSetting.Builder() // was: eB4Or3cBC2
+        .name("advanced-source-filler").description("Uses baritone to path to lava sources ahead of the player. Not recommended.").defaultValue(false).build());
+
+    // --- Inventory ---
+    private final Setting<Boolean> toggleAutoReplenish = sgInventory.add(new BoolSetting.Builder() // was: ITVesx8a
+        .name("toggle-auto-replenish").description("Automatically move items from inventory to hotbar when slots are empty.").defaultValue(true).build());
+    private final Setting<Boolean> toggleInventoryCleaner = sgInventory.add(new BoolSetting.Builder() // was: ymaK1v
+        .name("toggle-inventory-cleaner").description("Allow the paver to dispose of unwanted items.").defaultValue(false).build());
+
+    // --- Misc ---
+    private final Setting<Boolean> discordRpc = sgMisc.add(new BoolSetting.Builder() // was: WRxnOUhRut1YD0z
+        .name("discord-rpc").description("Send paver stats to discord activity.").defaultValue(true).build());
+    private final Setting<Boolean> enableFreeLook = sgMisc.add(new BoolSetting.Builder() // was: jusZpYdy95sR
+        .name("enable-freelook").description("Freelook when using the paver.").defaultValue(false).build());
+
+    /** Singleton reference (set in ctor). */
+    public static HighwayBuilder INSTANCE; // was: psJq59YIbp3Z (static)
+    private boolean starting = false;      // was: yNlQL5pBA2em
 
     public HighwayBuilder() {
         super(musheor.AUTOMATION, "HighwayBuilder", "Automated highway builder for 2b2t.");
         INSTANCE = this;
     }
 
+    @Override
     public void onActivate() {
-        if (this.mc.player == null || this.mc.world == null) {
-            return;
-        }
-        HighwayState highwayState = HighwayState.getInstance();
-        if (this.mc.player.isSpectator()) {
-            MusheorSystem.debug("Player is probably in queue, waiting...", new Object[0]);
-            highwayState.setTicksActive(0);
+        this.starting = true;
+        HighwayState.getInstance().setTicksActive(0);
+    }
+
+    /** One-shot startup: validates materials, sets up state, enables helper modules. */
+    private void startBuild() { // was: IeStEJRJ9eb3l()
+        HighwayState state = HighwayState.getInstance();
+        state.reset();
+        boolean noPavementBlockPresent = pavementBlock.get() == Blocks.OBSIDIAN
+            && InventoryManager.countItemInInventory(getFillBlock().asItem()) < 1;
+        boolean noPickaxePresent = InventoryManager.countPickaxes(false) < 1;
+        if (buildMode.get() != BuildMode.PAVE || (!noPavementBlockPresent && !noPickaxePresent)) {
+            boolean noNonSilkPickaxePresent = InventoryManager.countPickaxes(true) < 1;
+            if (buildMode.get() == BuildMode.DIG) {
+                if (noNonSilkPickaxePresent) this.error("No pickaxe found in inventory...!", new Object[0]);
+                PlayerUtils.toggleHighwayBuilder();
+            } else {
+                this.starting = false;
+                state.setDirection(WorldUtils.getMovementDirection());
+                state.setTicksActive(0);
+                InventoryManager.resetState(false);
+                if (!this.initHighwayState()) {
+                    PlayerUtils.toggleHighwayBuilder();
+                } else {
+                    PlayerUtils.setModuleSetting(KekNuker.class, "nuker-mode", KekNuker.NukerMode.SMART);
+                    PlayerUtils.setModuleSetting(KekNuker.class, "range", 5.5);
+                    this.enableHelperModules();
+                    StatsCollector.update();
+                    state.getBlocksToBuild().clear();
+                    state.getBlocksToBuild().add(mc.player.getBlockPos());
+                    state.getBlockBreakAttempts().clear();
+                    PlayerUtils.setModuleSetting(AutoWalk.class, "mode", AutoWalk.Mode.Simple);
+                    PlayerUtils.setModuleSetting(AutoWalk.class, "simple-direction", AutoWalk.Direction.Forwards);
+                }
+            }
         } else {
-            boolean bl;
-            highwayState.reset();
-            boolean bl2 = this.pavementBlock.get() == Blocks.OBSIDIAN && InventoryManager.usJLOV0subXO3(Items.ENDER_CHEST) < 1;
-            boolean bl3 = this.pavementBlock.get() == Blocks.OBSIDIAN && InventoryManager.usJLOV0subXO3(HighwayBuilder.getPavementBlock().asItem()) < 8;
-            boolean bl4 = InventoryManager.VYEwzRq(false) < 1;
-            boolean bl5 = bl = InventoryManager.VYEwzRq(true) < 1;
-            if (this.buildMode.get() == BuildMode.Pave && (bl2 || bl3 || bl4 || !HighwayBuilder.hasFood())) {
-                if (bl2) {
-                    this.error("No enderchests found in inventory...", new Object[0]);
-                }
-                if (bl3) {
-                    this.error("No pavement material found in inventory...", new Object[0]);
-                }
-                if (!HighwayBuilder.hasFood()) {
-                    this.error("No food found in inventory...", new Object[0]);
-                }
-                if (bl4) {
-                    this.error("No non-silk touch pickaxe found in inventory...!", new Object[0]);
-                }
-                PlayerUtils.xynAsOKhN7t();
-                return;
-            }
-            if (this.buildMode.get() == BuildMode.Dig && (bl || !HighwayBuilder.hasFood())) {
-                if (bl) {
-                    this.error("No pickaxe found in inventory...!", new Object[0]);
-                }
-                if (!HighwayBuilder.hasFood()) {
-                    this.error("No food found in inventory...", new Object[0]);
-                }
-                PlayerUtils.xynAsOKhN7t();
-                return;
-            }
-            highwayState.setCenterPos(this.mc.player.getBlockPos());
-            highwayState.setTicksActive(0);
-            InventoryManager.TAdu5cndwWu3A1(false);
-            this.initHighwayPosition();
-            PlayerUtils.jOdDDFXSeWl4(KekNuker.class, "nuker-mode", KekNuker.NukerMode.h9MViB);
-            this.enableCompanionModules();
-            highwayState.setCsvData(StatsHandler.BhO5G7());
-            highwayState.loadLifetimeStatsFromCsv();
-            highwayState.getBlocksToBuild().clear();
-            highwayState.getBlocksToBuild().add(this.mc.player.getBlockPos());
-            highwayState.getBlockBreakAttempts().clear();
-            PlayerUtils.jOdDDFXSeWl4(AutoWalk.class, "mode", AutoWalk.Mode.Simple);
-            PlayerUtils.jOdDDFXSeWl4(AutoWalk.class, "simple-direction", AutoWalk.Direction.Forwards);
+            if (noPavementBlockPresent) this.error("No pavement material found in inventory...", new Object[0]);
+            if (noPickaxePresent) this.error("No non-silk touch pickaxe found in inventory...!", new Object[0]);
+            PlayerUtils.toggleHighwayBuilder();
         }
     }
 
+    @Override
     public void onDeactivate() {
-        HighwayState.getInstance().saveLifetimeStatsToCsv();
-        PlayerUtils.KP44bk(false);
-        PathingHelper.xRVyNRV3cB7();
-        HighwayBuilder.disableCompanionModules();
+        this.starting = false;
+        Handlers.reset();
+        PlayerUtils.setAutoWalk(false);
+        PathingHelper.cancelEverything();
+        disableHelperModules();
         DiscordRPC.stop();
         HighwayState.getInstance().reset();
-        this.info("Deactivated, saving statistics...", new Object[0]);
+        this.info("Deactivated.", new Object[0]);
     }
 
     @EventHandler
-    public void onTick(TickEvent.Pre pre) {
-        HighwayState highwayState = HighwayState.getInstance();
-        if (this.mc.player == null || this.mc.world == null || this.mc.interactionManager == null) {
-            highwayState.setTicksActive(0);
-            return;
-        }
-        if (this.mc.player.isSpectator()) {
-            MusheorSystem.debug("Player is probably in queue, waiting...", new Object[0]);
-            highwayState.setTicksActive(0);
-            return;
-        }
-        highwayState.incrementTicksActive();
-        WorldUtils.jOdDDFXSeWl4(highwayState.getTicksActive(), HighwayBuilder.getPavementBlock());
-        if (WorldUtils.btLCQHvKVR()) {
-            return;
-        }
-        if (highwayState.getPendingBreakPos() != null) {
-            PlayerUtils.KP44bk(false);
-        }
-        if (((Boolean)this.enableDiscordRPC.get()).booleanValue()) {
-            highwayState.incrementTicksSinceLastAction();
-            if (highwayState.getTicksSinceLastAction() >= 200) {
-                highwayState.setTicksSinceLastAction(0);
-                DiscordRPC.updateActivity();
-            }
+    public void onTickPre(TickEvent.Pre event) { // was: FvaNWO(Pre)
+        HighwayState state = HighwayState.getInstance();
+        if (mc.player == null || mc.world == null || mc.interactionManager == null) {
+            state.setTicksActive(0);
+        } else if (mc.player.isSpectator()) {
+            this.info("Player is likely in queue, waiting to proceed with highwaybuilder state checks...", new Object[0]);
+            state.setTicksActive(0);
+        } else if (this.starting) {
+            this.startBuild();
         } else {
-            DiscordRPC.stop();
-        }
-        Module module = Modules.get().get(EchestFarmer.class);
-        boolean bl = ((AutoGap)Modules.get().get(AutoGap.class)).isEating();
-        if (HighwayBuilder.isEating() || bl || HighwayBuilder.isEchestFarming() || HighwayBuilder.isAttacking() || PlayerUtils.BT1BimvycZZjsYS() || highwayState.isResupplyActive()) {
-            PlayerUtils.KP44bk(false);
-            return;
-        }
-        int n = this.pavementBlock.get() == Blocks.OBSIDIAN ? InventoryManager.usJLOV0subXO3(Items.ENDER_CHEST) : 64;
-        int n2 = this.pavementBlock.get() == Blocks.OBSIDIAN ? InventoryManager.usJLOV0subXO3(((Block)this.pavementBlock.get()).asItem()) : 64;
-        highwayState.setBreakProgress(InventoryManager.VYEwzRq(false));
-        highwayState.setSwapDelayTicks(InventoryManager.VYEwzRq(true));
-        if (this.buildMode.get() == BuildMode.Pave) {
-            highwayState.setNeedsMaterials(n < 8 || n2 < 8 || highwayState.getBreakProgress() < 1 || !HighwayBuilder.hasFood());
-        }
-        if (this.buildMode.get() == BuildMode.Dig) {
-            highwayState.setNeedsMaterials(highwayState.getSwapDelayTicks() < 1 || !HighwayBuilder.hasFood());
-        }
-        if (highwayState.isInventoryBusy()) {
-            InventoryManager.H02kTTf();
-            return;
-        }
-        if (highwayState.isWaitingForRestock()) {
-            InventoryManager.mp3zoXQFKUKYj5(highwayState.getBaritoneGoal(), InventoryManager.LrAtLm);
-            return;
-        }
-        if (highwayState.isRestocking()) {
-            InventoryManager.mp3zoXQFKUKYj5(highwayState.getBaritoneGoal(), InventoryManager.LrAtLm);
-            MusheorSystem.debug("Restocking %s; Amount: %s", highwayState.getBaritoneGoal(), InventoryManager.LrAtLm);
-            return;
-        }
-        if (highwayState.isResupplying() && !module.isActive() && ((Boolean)this.allowEchestFarming.get()).booleanValue()) {
-            Handlers.PlefynG();
-            MusheorSystem.debug("Running post-echest farmer...", new Object[0]);
-            return;
-        }
-        if (this.shouldResupplyEchest(n2, n) && ((Boolean)this.allowEchestFarming.get()).booleanValue() && this.buildMode.get() == BuildMode.Pave) {
-            Handlers.gANxWblT();
-            MusheorSystem.debug("Running echest farmer...", new Object[0]);
-            return;
-        }
-        if (highwayState.needsMaterials() && (!((Boolean)this.allowItemRestocking.get()).booleanValue() || this.mode.get() == Mode.Manual)) {
-            Object object = "Player is low on materials... Missing: ";
-            if (n < 8) {
-                object = (String)object + "Enderchest count: " + n + "/8 ";
+            state.incrementTicksActive();
+            WorldUtils.pruneTimedOutPlacements(state.getTicksActive(), getFillBlock());
+            if (state.getPendingBreakPos() != null) PlayerUtils.setAutoWalk(false);
+
+            state.incrementTicksSinceLastAction();
+            if (state.getTicksSinceLastAction() >= 200) {
+                state.setTicksSinceLastAction(0);
+                StatsCollector.collectStats();
+                if (discordRpc.get()) DiscordRPC.update();
+                else DiscordRPC.stop();
             }
-            if (n2 < 8) {
-                object = (String)object + "Obsidian count: " + n2 + "/8 ";
-            }
-            if (!HighwayBuilder.hasFood()) {
-                object = (String)object + "Food (golden apples blacklisted?) ";
-            }
-            if (HighwayBuilder.getBuildMode() == BuildMode.Pave && highwayState.getSwapDelayTicks() < 1) {
-                object = (String)object + "Non SilkTouch pickaxe.";
-            }
-            if (HighwayBuilder.getBuildMode() == BuildMode.Dig && highwayState.getBreakProgress() < 1) {
-                object = (String)object + "Pickaxe.";
-            }
-            PlayerUtils.xynAsOKhN7t();
-            if (((Boolean)this.isDisconnect.get()).booleanValue()) {
-                PlayerUtils.setStartX((String)object);
+
+            Module echestFarmer = Modules.get().get(EchestFarmer.class);
+            boolean isGapEating = ((AutoGap) Modules.get().get(AutoGap.class)).isEating();
+            if (!isEating() && !isGapEating && !isEchestFarmerActive() && !isKillAuraAttacking()
+                && !PlayerUtils.isGatheringItem() && !state.isFlag11()) {
+                int enderChestCount = pavementBlock.get() == Blocks.OBSIDIAN ? InventoryManager.countItemInInventory(Items.ENDER_CHEST) : 64;
+                int obsidianCount = InventoryManager.countItemInInventory(((Block) pavementBlock.get()).asItem());
+                // NOTE: breakProgress/swapDelayTicks int slots are reused here as scratch pickaxe counters.
+                state.setBreakProgress(InventoryManager.countPickaxes(false)); // non-silk pickaxe count
+                state.setSwapDelayTicks(InventoryManager.countPickaxes(true)); // any pickaxe count
+                if (buildMode.get() == BuildMode.PAVE) {
+                    state.setFlag2(enderChestCount < 8 || obsidianCount < 8 || state.getBreakProgress() < 1 || !hasFood());
+                }
+                if (buildMode.get() == BuildMode.DIG) {
+                    state.setFlag2(state.getSwapDelayTicks() < 1 || !hasFood());
+                }
+
+                if (state.isFlag10()) {
+                    InventoryManager.handlePostRestock();
+                } else if (state.isFlag8()) {
+                    InventoryManager.runRestockProcess(state.getBaritoneGoalType(), InventoryManager.restockAmount);
+                } else if (state.isFlag9()) {
+                    InventoryManager.runRestockProcess(state.getBaritoneGoalType(), InventoryManager.restockAmount);
+                    MusheorSystem.debug("Restocking %s; Amount: %s", state.getBaritoneGoalType(), InventoryManager.restockAmount);
+                } else if (state.isFlag11() && !echestFarmer.isActive() && echestFarming.get()) {
+                    Handlers.runPostEchestFarmer();
+                    MusheorSystem.debug("Running post-echest farmer...");
+                } else if (this.shouldRunEchestFarmer(obsidianCount, enderChestCount) && echestFarming.get() && buildMode.get() == BuildMode.PAVE) {
+                    Handlers.runEchestFarmer();
+                    MusheorSystem.debug("Running echest farmer...");
+                } else if (!state.isFlag2() || (enableItemRestocking.get() && mode.get() != Mode.MANUAL)) {
+                    if (state.isFlag2()) {
+                        if (InventoryManager.isRestocking || InventoryManager.postRestock) return;
+                        InventoryManager.targetPos = mc.player.getBlockPos();
+                        PlayerUtils.setAutoWalk(false);
+                        InventoryManager.runRestock();
+                    }
+                    if (buildMode.get() == BuildMode.PAVE) {
+                        if (mode.get() == Mode.AUTO) {
+                            Handlers.runAutoBuild();
+                        } else {
+                            switch ((HighwayType) highwayType.get()) {
+                                case CARDINAL -> Handlers.paveCardinal();
+                                case DIAGONAL -> Handlers.paveDiagonal();
+                            }
+                        }
+                    }
+                    if (buildMode.get() == BuildMode.DIG) {
+                        switch ((HighwayType) highwayType.get()) {
+                            case CARDINAL -> Handlers.digCardinal();
+                            case DIAGONAL -> Handlers.digDiagonal();
+                        }
+                    }
+                } else {
+                    String reason = "Player is low on materials... Missing: ";
+                    if (enderChestCount < 8) reason += "Enderchest count: " + enderChestCount + "/8 ";
+                    if (obsidianCount < 1) reason += "Obsidian count: " + obsidianCount + "/8 ";
+                    if (!hasFood()) reason += "Food - golden apples blacklisted in auto-eat module? ";
+                    if (getBuildMode() == BuildMode.PAVE && state.getSwapDelayTicks() < 1) reason += "Non SilkTouch pickaxe.";
+                    if (getBuildMode() == BuildMode.DIG && state.getBreakProgress() < 1) reason += "Pickaxe.";
+                    PlayerUtils.toggleHighwayBuilder();
+                    if (disconnectIfNoMaterials.get()) PlayerUtils.sendChatMessage(reason);
+                    else this.error(reason, new Object[0]);
+                }
             } else {
-                this.error((String)object, new Object[0]);
-            }
-            return;
-        }
-        if (highwayState.needsMaterials()) {
-            if (InventoryManager.QFWUbSJ63lmQY || InventoryManager.NZ3iHWsF) {
-                return;
-            }
-            InventoryManager.NrfIVPgqB9 = this.mc.player.getBlockPos();
-            PlayerUtils.KP44bk(false);
-            InventoryManager.Dzj74FIoxmie();
-        }
-        if (this.buildMode.get() == BuildMode.Pave) {
-            switch (((HighwayType)((Object)this.highwayType.get())).ordinal()) {
-                case 0: {
-                    Handlers.Pmh3HuqB53i0Y();
-                    break;
-                }
-                case 1: {
-                    Handlers.eNsdDMk8mJXTb();
-                }
-            }
-        }
-        if (this.buildMode.get() == BuildMode.Dig) {
-            switch (((HighwayType)((Object)this.highwayType.get())).ordinal()) {
-                case 0: {
-                    Handlers.Z6nxChaWC9ymwoio();
-                    break;
-                }
-                case 1: {
-                    Handlers.AoH6MX();
-                }
+                PlayerUtils.setAutoWalk(false);
             }
         }
     }
 
-    private boolean shouldResupplyEchest(int obsidianCount, int echestCount) {
-        HighwayState highwayState = HighwayState.getInstance();
-        if (highwayState.isRestocking() || highwayState.jIXFBaSwUWYqAc9() || highwayState.isInventoryBusy() || PlayerUtils.BT1BimvycZZjsYS()) {
-            return false;
-        }
-        if (this.pavementBlock.get() != Blocks.OBSIDIAN) {
-            return false;
-        }
-        return n2 > 8 && InventoryManager.ZeOLrA() > 0 && n <= 8;
-    }
-
-    private void initHighwayPosition() {
-        assert (this.mc.player != null);
-        HighwayState highwayState = HighwayState.getInstance();
-        highwayState.setDirection(WorldUtils.eQlnaotm4pUDUmJT());
-        highwayState.setStartX(this.mc.player.getX());
-        highwayState.setStartZ(this.mc.player.getZ());
-        highwayState.setLastX((double)this.mc.player.getX() + 0.5);
-        highwayState.setLastZ((double)this.mc.player.getZ() + 0.5);
-        highwayState.setCenterX(this.mc.player.getX());
-        highwayState.setCenterY(this.mc.player.getY());
-        highwayState.setCenterZ(this.mc.player.getZ());
-    }
-
-    private void enableCompanionModules() {
-        Module module = Modules.get().get(KekNuker.class);
-        Module module2 = Modules.get().get(AutoEat.class);
-        Module module3 = Modules.get().get(AutoGap.class);
-        Module module4 = Modules.get().get(KillAura.class);
-        Module module5 = Modules.get().get(SourceRemover.class);
-        Module module6 = Modules.get().get(InventoryCleaner.class);
-        Module module7 = Modules.get().get(HotbarReplenish.class);
-        Module module8 = Modules.get().get(AutoTotem.class);
-        if (((Boolean)this.enableNuker.get()).booleanValue() && !module.isActive()) {
-            module.toggle();
-        }
-        if (((Boolean)this.autoEat.get()).booleanValue() && !module2.isActive()) {
-            module2.toggle();
-        }
-        if (((Boolean)this.autoGap.get()).booleanValue() && !module3.isActive()) {
-            module3.toggle();
-        }
-        if (((Boolean)this.enableKillAura.get()).booleanValue() && !module4.isActive()) {
-            module4.toggle();
-        }
-        if (((Boolean)this.inventoryCleaner.get()).booleanValue() && !module6.isActive()) {
-            module6.toggle();
-        }
-        if (((Boolean)this.autoReplenish.get()).booleanValue() && !module7.isActive()) {
-            module7.toggle();
-        }
-        if (((Boolean)this.enableDiscordRPC.get()).booleanValue()) {
-            DiscordRPC.start();
-        }
-        if (((Boolean)this.enableFreeLook.get()).booleanValue()) {
-            PlayerUtils.Gd2ks78ySQq40();
-        }
-        if (((Boolean)this.enableSourceRemover.get()).booleanValue() && !module5.isActive()) {
-            module5.toggle();
-        }
-        if (((Boolean)this.enableAutoTotem.get()).booleanValue() && !module8.isActive()) {
-            module8.toggle();
-        }
-    }
-
-    public static void disableCompanionModules() {
-        Module module3;
-        Module module2;
-        for (Module module3 : module2 = new Module[]{Modules.get().get(EchestFarmer.class), Modules.get().get(KekNuker.class), Modules.get().get(AutoWalk.class), Modules.get().get(HotbarReplenish.class), Modules.get().get(FreeLook.class), Modules.get().get(SourceRemover.class), Modules.get().get(InventoryCleaner.class)}) {
-            if (!module3.isActive()) continue;
-            module3.toggle();
-        }
-        Module module4 = Modules.get().get(KillAura.class);
-        Module module5 = Modules.get().get(AutoTotem.class);
-        Module module6 = Modules.get().get(AutoEat.class);
-        module3 = Modules.get().get(AutoGap.class);
-        if (((Boolean)HighwayBuilder.INSTANCE.disableKillAuraAfterDeactivating.get()).booleanValue() && module4.isActive()) {
-            module4.toggle();
-        }
-        if (((Boolean)HighwayBuilder.INSTANCE.disableAutoTotemAfterDeactivating.get()).booleanValue() && module5.isActive()) {
-            module5.toggle();
-        }
-        if (((Boolean)HighwayBuilder.INSTANCE.disableAutoEat.get()).booleanValue() && module6.isActive()) {
-            module6.toggle();
-        }
-        if (((Boolean)HighwayBuilder.INSTANCE.disableAutoGap.get()).booleanValue() && module3.isActive()) {
-            module3.toggle();
-        }
-    }
-
-    public static boolean hasFood() {
-        List list = (List)((AutoEat)Modules.get().get(AutoEat.class)).blacklist.get();
-        for (int i = 0; i < Objects.requireNonNull(MinecraftClient.getInstance().player).getInventory().main.size(); ++i) {
-            ItemStack ItemStack2 = MinecraftClient.getInstance().player.getInventory().getStack(i);
-            if (ItemStack2.getItem().contains(DataComponentTypes.FOOD) && !(ItemStack2.getItem() instanceof SuspiciousStewItem) && !list.contains(ItemStack2.getItem())) {
-                return true;
-            }
-            if (ItemStack2.getStack() != Items.GOLDEN_APPLE || list.contains(ItemStack2.getItem())) continue;
-            return true;
+    /** True if the echest farmer should run (obsidian low, echest shulkers available, pavement=obsidian). */
+    private boolean shouldRunEchestFarmer(int obsidianCount, int echestCount) { // was: FvaNWO(int,int)
+        HighwayState state = HighwayState.getInstance();
+        if (!state.isFlag7() && !state.isFlag6() && !state.isFlag8() && !PlayerUtils.isGatheringItem()) {
+            return pavementBlock.get() == Blocks.OBSIDIAN
+                && echestCount > 8 && InventoryManager.countEmptyInventorySlots() > 0 && obsidianCount <= 8;
         }
         return false;
     }
 
-    public static void onBlockMined(BlockState BlockState2) {
-        HighwayState highwayState = HighwayState.getInstance();
-        if (BlockState2.getBlock() == Blocks.OBSIDIAN) {
-            highwayState.incrementSessionObsidianMined();
+    /** Sets up highway direction/center/checkpoint state (Auto mode detects the highway). */
+    private boolean initHighwayState() { // was: sFazojak6ig8QgGq()
+        assert mc.player != null;
+        HighwayState state = HighwayState.getInstance();
+        state.setDirection(WorldUtils.getMovementDirection());
+        state.setStartX(mc.player.getBlockX());
+        state.setStartZ(mc.player.getBlockZ());
+        state.setLastX(VersionHelper.get().getPlayerPos().getX());
+        state.setLastZ(VersionHelper.get().getPlayerPos().getZ());
+        state.setCenterX(mc.player.getBlockX());
+        state.setCenterY(mc.player.getBlockY());
+        state.setCenterZ(mc.player.getBlockZ());
+        if (mode.get() == Mode.AUTO) {
+            HighwayLocator.Checkpoint detected = HighwayLocator.locateNearest(
+                mc.player.getBlockX(), mc.player.getBlockZ(), mc.player.getBlockY(), state.getDirection());
+            if (detected == null) {
+                this.error("Auto mode could not detect a highway. Stand on a highway or use Semi mode.", new Object[0]);
+                return false;
+            }
+            state.setCurrentCheckpoint(detected);
+            state.setStartX(detected.startX);
+            state.setStartZ(detected.startZ);
+            state.setLastX(detected.alignX);
+            state.setLastZ(detected.alignZ);
+            state.setCenterX(detected.startX);
+            state.setCenterZ(detected.startZ);
+            this.info("Detected: §b" + detected.label + "§r | Width: §e" + detected.width + "§r | Dir: §a" + detected.direction, new Object[0]);
         }
-        if (BlockState2.getBlock() == Blocks.NETHERRACK) {
-            highwayState.incrementSessionLavaBuckets();
+        return true;
+    }
+
+    /** Enables all the helper modules the paver relies on (per settings). */
+    private void enableHelperModules() { // was: ewq603nIlCd9Gbu()
+        Module kekNuker = Modules.get().get(KekNuker.class);
+        Module autoEat = Modules.get().get(AutoEat.class);
+        Module autoGap = Modules.get().get(AutoGap.class);
+        Module killAura = Modules.get().get(KillAura.class);
+        Module sourceRemover = Modules.get().get(SourceRemover.class);
+        Module inventoryCleaner = Modules.get().get(InventoryCleaner.class);
+        Module hotbarReplenish = Modules.get().get(HotbarReplenish.class);
+        Module freeLook = Modules.get().get(FreeLook.class);
+        if (toggleKekNuker.get() && !kekNuker.isActive()) kekNuker.toggle();
+        if (toggleAutoEat.get() && !autoEat.isActive()) autoEat.toggle();
+        if (toggleAutoGap.get() && !autoGap.isActive()) autoGap.toggle();
+        if (toggleKillAura.get() && !killAura.isActive()) killAura.toggle();
+        if (toggleInventoryCleaner.get() && !inventoryCleaner.isActive()) inventoryCleaner.toggle();
+        if (enableFreeLook.get() && !freeLook.isActive()) PlayerUtils.enableFreeLookCamera();
+        if (toggleAutoReplenish.get() && !hotbarReplenish.isActive()) hotbarReplenish.toggle();
+        if (discordRpc.get()) DiscordRPC.start();
+        if (toggleSourceFiller.get() && !sourceRemover.isActive()) sourceRemover.toggle();
+    }
+
+    /** Disables the helper modules the paver toggled on. */
+    public static void disableHelperModules() { // was: FvaNWO() (static)
+        Module[] alwaysDisable = {
+            Modules.get().get(EchestFarmer.class), Modules.get().get(KekNuker.class),
+            Modules.get().get(AutoWalk.class), Modules.get().get(HotbarReplenish.class),
+            Modules.get().get(FreeLook.class), Modules.get().get(SourceRemover.class),
+            Modules.get().get(InventoryCleaner.class), Modules.get().get(KekBounce.class)
+        };
+        for (Module module : alwaysDisable) if (module.isActive()) module.toggle();
+
+        Module killAura = Modules.get().get(KillAura.class);
+        Module autoEat = Modules.get().get(AutoEat.class);
+        Module autoGap = Modules.get().get(AutoGap.class);
+        if (INSTANCE.toggleKillAura.get() && killAura.isActive()) killAura.toggle();
+        if (INSTANCE.toggleAutoEat.get() && autoEat.isActive()) autoEat.toggle();
+        if (INSTANCE.toggleAutoGap.get() && autoGap.isActive()) autoGap.toggle();
+    }
+
+    /** True if the player has any non-blacklisted food (or an enchanted golden apple). */
+    public static boolean hasFood() { // was: Q90GLXQ0Pef() (static)
+        List<Item> blacklistedFood = ((AutoEat) Modules.get().get(AutoEat.class)).blacklist.get();
+        for (int i = 0; i < Objects.requireNonNull(MinecraftClient.getInstance().player).getInventory().main.size(); i++) {
+            ItemStack stack = MinecraftClient.getInstance().player.getInventory().getStack(i);
+            if (stack.getComponents().contains(DataComponentTypes.FOOD)
+                && !(stack.getItem() instanceof ShulkerBoxBlock)
+                && !blacklistedFood.contains(stack.getItem())) {
+                return true;
+            }
+            if (stack.getItem() == Items.ENCHANTED_GOLDEN_APPLE && !blacklistedFood.contains(stack.getItem())) {
+                return true;
+            }
         }
-        if (BlockState2.getBlock() == Blocks.ENDER_CHEST) { // was: field_10443
-            highwayState.incrementSessionMiscMined();
+        return false;
+    }
+
+    /** Increments the session mined-block counters based on the broken block's type. */
+    public static void countBrokenBlock(BlockState s) { // was: FvaNWO(BlockState) (static)
+        HighwayState state = HighwayState.getInstance();
+        if (s.getBlock() == Blocks.OBSIDIAN) state.incrementSessionObsidianMined();
+        if (s.getBlock() == Blocks.CRYING_OBSIDIAN) state.incrementSessionLavaBuckets();
+        if (s.getBlock() == Blocks.ENDER_CHEST) state.incrementSessionMiscMined();
+    }
+
+    public static boolean isEating() { // was: psJq59YIbp3Z() (static)
+        return ((AutoEat) Modules.get().get(AutoEat.class)).eating || ((AutoGap) Modules.get().get(AutoGap.class)).isEating();
+    }
+
+    public static boolean isKillAuraAttacking() { // was: SOYyh5IPg26f7F() (static)
+        return ((KillAura) Modules.get().get(KillAura.class)).attacking;
+    }
+
+    // --- Accessors used by Handlers / WorldUtils / BlockPositions ---
+    public static WorldUtils.Direction8 getDirection() { return HighwayState.getInstance().getDirection(); } // was: rKbT3Ifwo()
+    public static boolean isEchestFarmerActive() { return EchestFarmer.INSTANCE.isActive(); } // was: r7hOYIKN2()
+    public static BuildMode getBuildMode() { return INSTANCE.buildMode.get(); } // was: oZHMlTL()
+    public static Mode getMode() { return INSTANCE.mode.get(); } // was: xQr5FhbwpQPWgIQ()
+    public static HighwayType getHighwayType() { // was: OMMZL1F3q()
+        if (INSTANCE.mode.get() == Mode.AUTO) {
+            HighwayLocator.Checkpoint d = HighwayState.getInstance().getCurrentCheckpoint();
+            if (d != null) return d.type;
         }
+        return INSTANCE.highwayType.get();
     }
-
-    public static boolean isEating() {
-        return ((AutoEat)Modules.get().get(AutoEat.class)).eating || ((AutoGap)Modules.get().get(AutoGap.class)).isEating();
+    public static int getWidth() { // was: zu3a44xDeMFMCRwm()
+        if (INSTANCE.mode.get() == Mode.AUTO) {
+            HighwayLocator.Checkpoint d = HighwayState.getInstance().getCurrentCheckpoint();
+            if (d != null) return d.width;
+        }
+        return INSTANCE.pavementWidth.get();
     }
+    public static boolean mineAboveRails() { return INSTANCE.mineAboveRails.get(); } // was: krxNb5lcQuWA()
+    public static boolean replaceCryingObsidian() { return INSTANCE.replaceCryingObsidian.get(); } // was: nt0HZnvBBp()
+    public static Block getFillBlock() { return INSTANCE.pavementBlock.get(); } // was: amz3UB1vE()
+    public static boolean placeRails() { return INSTANCE.placeRails.get(); } // was: sBBIyQG5NWq0K()
+    public static boolean placeLeftRail() { return INSTANCE.placeLeftRail.get(); } // was: sZkZ1izAy()
+    public static boolean placeRightRail() { return INSTANCE.placeRightRail.get(); } // was: QYKUhjp()
+    public static Block getScaffoldBlock() { return INSTANCE.scaffoldBlock.get(); } // was: NIz4xic3Js9()
+    public static ScaffoldMode getScaffoldMode() { return INSTANCE.scaffoldMode.get(); } // was: u1WFwbQRSKa()
+    public static boolean scaffoldLeftRail() { return INSTANCE.scaffoldLeftRail.get(); } // was: LGDfbZq()
+    public static boolean scaffoldRightRail() { return INSTANCE.scaffoldRightRail.get(); } // was: to3T8DJCDVX8po()
+    public static boolean advancedSourceFiller() { return INSTANCE.advancedSourceFiller.get(); } // was: Sd3jEwKuGABy()
+    public static boolean hasCeiling() { return INSTANCE.fillCeiling.get(); } // was: kJfFkD47Vh()
+    public static boolean enableItemRestocking() { return INSTANCE.enableItemRestocking.get(); } // was: ubHptFBRn5bO()
+    public static boolean swapBrokenPickaxes() { return INSTANCE.swapBrokenPickaxes.get(); } // was: apOpfoOHr3fJVwT()
+    public static boolean shulkerRestocking() { return INSTANCE.shulkerRestocking.get(); } // was: hq1pN0qY()
+    public static boolean echestShulkerRestocking() { return INSTANCE.echestShulkerRestocking.get(); } // was: ptxWcpd1WV763T5()
+    public static boolean toolShulkerRestocking() { return INSTANCE.toolShulkerRestocking.get(); } // was: DnAk86nuI()
+    public static boolean isAutoBounceEnabled() { return INSTANCE.autoBounce.get() && INSTANCE.buildMode.get() == BuildMode.PAVE; } // was: LlN8EpIZKbk()
+    public static int getBounceDistanceCheck() { return INSTANCE.bounceDistanceCheck.get(); } // was: pgjj9cLYUTE5g()
 
-    public static boolean isAttacking() {
-        return ((KillAura)Modules.get().get(KillAura.class)).attacking;
-    }
-
-    public static WorldUtils.Direction8 getDirection() {
-        return HighwayState.getInstance().getDirection();
-    }
-
-    public static boolean isEchestFarming() {
-        return EchestFarmer.Nr0B0YDZRAaA.isActive();
-    }
-
-    public static BuildMode getBuildMode() {
-        return (BuildMode)((Object)HighwayBuilder.INSTANCE.buildMode.get());
-    }
-
-    public static Mode getMode() {
-        return (Mode)((Object)HighwayBuilder.INSTANCE.mode.get());
-    }
-
-    public static HighwayType getHighwayType() {
-        return (HighwayType)((Object)HighwayBuilder.INSTANCE.highwayType.get());
-    }
-
-    public static int getPavementWidth() {
-        return (Integer)HighwayBuilder.INSTANCE.pavementWidth.get();
-    }
-
-    public static boolean isRemoveBlocksAboveRails() {
-        return (Boolean)HighwayBuilder.INSTANCE.removeBlocksAboveRails.get();
-    }
-
-    public static boolean isReplaceCryingObsidian() {
-        return (Boolean)HighwayBuilder.INSTANCE.replaceCryingObsidian.get();
-    }
-
-    public static boolean isPauseOnLag() {
-        return (Boolean)HighwayBuilder.INSTANCE.pauseOnLag.get();
-    }
-
-    public static int getLagThreshold() {
-        return (Integer)HighwayBuilder.INSTANCE.lagThreshold.get();
-    }
-
-    public static Block getPavementBlock() {
-        return (Block)HighwayBuilder.INSTANCE.pavementBlock.get();
-    }
-
-    public static boolean isPlaceRails() {
-        return (Boolean)HighwayBuilder.INSTANCE.placeRails.get();
-    }
-
-    public static boolean isPlaceLeftRails() {
-        return (Boolean)HighwayBuilder.INSTANCE.placeLeftRails.get();
-    }
-
-    public static boolean isPlaceRightRails() {
-        return (Boolean)HighwayBuilder.INSTANCE.placeRightRails.get();
-    }
-
-    public static Block getScaffoldBlock() {
-        return (Block)HighwayBuilder.INSTANCE.scaffoldBlock.get();
-    }
-
-    public static ScaffoldMode getScaffoldMode() {
-        return (ScaffoldMode)((Object)HighwayBuilder.INSTANCE.scaffoldMode.get());
-    }
-
-    public static boolean isScaffoldLeftRail() {
-        return (Boolean)HighwayBuilder.INSTANCE.scaffoldLeftRail.get();
-    }
-
-    public static boolean isScaffoldRightRail() {
-        return (Boolean)HighwayBuilder.INSTANCE.scaffoldRightRail.get();
-    }
-
-    public static boolean isRemoveAnnoyingLava() {
-        return (Boolean)HighwayBuilder.INSTANCE.removeAnnoyingLava.get();
-    }
-
-    public static boolean isFillCeiling() {
-        return (Boolean)HighwayBuilder.INSTANCE.fillCeiling.get();
-    }
-
-    public static boolean isAllowItemRestocking() {
-        return (Boolean)HighwayBuilder.INSTANCE.allowItemRestocking.get();
-    }
-
-    public static boolean isStoreBrokenPickaxes() {
-        return (Boolean)HighwayBuilder.INSTANCE.storeBrokenPickaxes.get();
-    }
-
-    public static boolean isAllowShulkerRestocking() {
-        return (Boolean)HighwayBuilder.INSTANCE.allowShulkerRestocking.get();
-    }
-
-    public static boolean isAllowEchestShulkerRestocking() {
-        return (Boolean)HighwayBuilder.INSTANCE.allowEchestShulkerRestocking.get();
-    }
-
-    public static boolean isAllowToolShulkerRestocking() {
-        return (Boolean)HighwayBuilder.INSTANCE.allowToolShulkerRestocking.get();
-    }
-
+    /** Renders the pending pavement positions as an ESP (Semi/Manual modes). */
     @EventHandler
-    private void onRender3D(Render3DEvent render3DEvent) {
-        HighwayState highwayState = HighwayState.getInstance();
-        assert (this.mc.player != null);
-        if (highwayState.getDirection() == null) {
-            return;
+    private void onRender(Render3DEvent event) { // was: FvaNWO(Render3DEvent)
+        HighwayState state = HighwayState.getInstance();
+        assert mc.player != null;
+        if (state.getDirection() == null || state.getCenterX() == null || state.getCenterY() == null || state.getCenterZ() == null
+            || state.getLastZ() == null || state.getLastX() == null) return;
+        if (!MusheorSystem.Manager.placeRender.get() || buildMode.get() != BuildMode.PAVE) return;
+
+        HighwayLocator.Checkpoint detected = HighwayLocator.locateNearest(
+            mc.player.getBlockX(), mc.player.getBlockZ(), mc.player.getBlockY(), getDirection());
+        int railY = state.getCenterY();
+        List<BlockPos> cardinalPositions = new ArrayList<>();
+        for (BlockPos pos : BlockPositions.cardinalFloor(3, 2, placeLeftRail(), placeRightRail())) {
+            if ((detected == null || pos.getY() != railY || !HighwayLocator.isRailOnAnyHighway(pos, detected)) && BlockUtils.canPlace(pos, true))
+                cardinalPositions.add(pos);
         }
-        if (HighwayState.getInstance().getCenterX() == null || HighwayState.getInstance().getCenterY() == null || HighwayState.getInstance().getCenterZ() == null) {
-            return;
+        List<BlockPos> diagonalPositions = new ArrayList<>();
+        for (BlockPos pos : BlockPositions.diagonalFloor(2, 2, placeLeftRail(), placeRightRail())) {
+            if ((detected == null || pos.getY() != railY || !HighwayLocator.isRailOnAnyHighway(pos, detected)) && BlockUtils.canPlace(pos, true))
+                diagonalPositions.add(pos);
         }
-        if (highwayState.getLastX() == null || highwayState.getLastZ() == null) {
-            return;
-        }
-        if (((Boolean)MusheorSystem.Manager.placeRender.get()).booleanValue()) {
-            ArrayList<BlockPos> arrayList = new ArrayList<BlockPos>(List.of());
-            for (BlockPos BlockPos2 : BlockPositions.jOdDDFXSeWl4(2, 3, HighwayBuilder.isPlaceLeftRails(), HighwayBuilder.isPlaceRightRails())) {
-                if (!BlockUtils.canPlace((BlockPos)BlockPos2, (boolean)true)) continue;
-                arrayList.add(BlockPos2);
-            }
-            ArrayList arrayList2 = new ArrayList(List.of());
-            for (BlockPos BlockPos3 : BlockPositions.Gt56Sj4a6BWhgB(2, 2, HighwayBuilder.isPlaceLeftRails(), HighwayBuilder.isPlaceRightRails())) {
-                if (!BlockUtils.canPlace((BlockPos)BlockPos3, (boolean)true)) continue;
-                arrayList2.add(BlockPos3);
-            }
-            if (this.buildMode.get() == BuildMode.Pave) {
-                if (this.highwayType.get() == HighwayType.Cardinal) {
-                    RenderUtils.jOdDDFXSeWl4(render3DEvent, arrayList, HighwayBuilder.getPavementBlock());
-                }
-                if (this.highwayType.get() == HighwayType.Diagonal) {
-                    RenderUtils.jOdDDFXSeWl4(render3DEvent, arrayList2, HighwayBuilder.getPavementBlock());
-                }
-            }
-        }
+        if (getHighwayType() == HighwayType.CARDINAL) RenderUtils.render(event, cardinalPositions, getFillBlock());
+        if (getHighwayType() == HighwayType.DIAGONAL) RenderUtils.render(event, diagonalPositions, getFillBlock());
     }
 
-    public static final class BuildMode
-    extends Enum<BuildMode> {
-        public static final /* enum */ BuildMode Pave = new BuildMode();
-        public static final /* enum */ BuildMode Dig = new BuildMode();
-        private static final /* synthetic */ BuildMode[] $VALUES;
+    /** Pave vs. Dig. */ // was: enum BuildMode {FvaNWO, Q90GLXQ0Pef}
+    public enum BuildMode { PAVE, DIG }
 
-        public static BuildMode[] values() {
-            return (BuildMode[])$VALUES.clone();
-        }
+    /** Cardinal vs. Diagonal highway. */ // was: enum HighwayType {FvaNWO, Q90GLXQ0Pef}
+    public enum HighwayType { CARDINAL, DIAGONAL }
 
-        public static BuildMode valueOf(String string) {
-            return Enum.valueOf(BuildMode.class, string);
-        }
+    /** Auto (full detection) / Semi (chosen type) / Manual (full manual control). */ // was: enum Mode {FvaNWO, Q90GLXQ0Pef, psJq59YIbp3Z}
+    public enum Mode { AUTO, SEMI, MANUAL }
 
-        private static /* synthetic */ BuildMode[] $init() {
-            return new BuildMode[]{Pave, Dig};
-        }
-
-        static {
-            $VALUES = BuildMode.$init();
-        }
-    }
-
-    public static final class Mode
-    extends Enum<Mode> {
-        public static final /* enum */ Mode Auto = new Mode();
-        public static final /* enum */ Mode Manual = new Mode();
-        private static final /* synthetic */ Mode[] $VALUES;
-
-        public static Mode[] values() {
-            return (Mode[])$VALUES.clone();
-        }
-
-        public static Mode valueOf(String string) {
-            return Enum.valueOf(Mode.class, string);
-        }
-
-        private static /* synthetic */ Mode[] $init() {
-            return new Mode[]{Auto, Manual};
-        }
-
-        static {
-            $VALUES = Mode.$init();
-        }
-    }
-
-    public static final class HighwayType
-    extends Enum<HighwayType> {
-        public static final /* enum */ HighwayType Cardinal = new HighwayType();
-        public static final /* enum */ HighwayType Diagonal = new HighwayType();
-        private static final /* synthetic */ HighwayType[] $VALUES;
-
-        public static HighwayType[] values() {
-            return (HighwayType[])$VALUES.clone();
-        }
-
-        public static HighwayType valueOf(String string) {
-            return Enum.valueOf(HighwayType.class, string);
-        }
-
-        private static /* synthetic */ HighwayType[] $init() {
-            return new HighwayType[]{Cardinal, Diagonal};
-        }
-
-        static {
-            $VALUES = HighwayType.$init();
-        }
-    }
-
-    public static final class ScaffoldMode
-    extends Enum<ScaffoldMode> {
-        public static final /* enum */ ScaffoldMode None = new ScaffoldMode();
-        public static final /* enum */ ScaffoldMode GrimScaffold = new ScaffoldMode();
-        public static final /* enum */ ScaffoldMode AirPlace = new ScaffoldMode();
-        private static final /* synthetic */ ScaffoldMode[] $VALUES;
-
-        public static ScaffoldMode[] values() {
-            return (ScaffoldMode[])$VALUES.clone();
-        }
-
-        public static ScaffoldMode valueOf(String string) {
-            return Enum.valueOf(ScaffoldMode.class, string);
-        }
-
-        private static /* synthetic */ ScaffoldMode[] $init() {
-            return new ScaffoldMode[]{None, GrimScaffold, AirPlace};
-        }
-
-        static {
-            $VALUES = ScaffoldMode.$init();
-        }
-    }
+    /** Scaffolding style for dig mode: none / normal / advanced. */ // was: enum ScaffoldMode {FvaNWO, Q90GLXQ0Pef, psJq59YIbp3Z}
+    public enum ScaffoldMode { NONE, NORMAL, ADVANCED }
 }
-

@@ -1,9 +1,10 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// Class name was already readable; internal members were obfuscated.
 package musheor.modules.automation;
 
-import java.util.ArrayList;
-import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.gui.GuiTheme;
 import meteordevelopment.meteorclient.gui.widgets.WWidget;
@@ -20,7 +21,7 @@ import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.orbit.EventHandler;
 import musheor.musheor;
-import musheor.utils.InventoryManager;
+import musheor.modules.automation.InventoryManager;
 import musheor.utils.PlayerUtils;
 import musheor.utils.WorldUtils;
 import net.minecraft.block.ShulkerBoxBlock;
@@ -29,158 +30,130 @@ import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.network.packet.Packet;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 
 /**
- * Automatically drops unwanted items from the player's inventory.
- *
- * Supports Blacklist mode (drop selected items) and Whitelist mode (keep only selected items).
- * The "Blacklist inventory" button scans the current inventory and blacklists everything in it.
- * Items can optionally be thrown backward (rotateDrop) to avoid them landing in front of the player.
+ * "inv-cleaner" — automatically drops unwanted items. Supports a whitelist (keep only
+ * listed) or blacklist (drop listed) filter, optional disposal of empty shulker boxes
+ * after a grace period (to avoid dropping shulkers whose contents haven't synced), and
+ * an optional "rotate-drop" that briefly faces away so items land behind the player.
  */
 public class InventoryCleaner extends Module {
-    private static final MinecraftClient mc = MinecraftClient.getInstance(); // was: method_1551, RG4EUBK1NAGPn74
+    private static final MinecraftClient mc = MinecraftClient.getInstance(); // was: Q90GLXQ0Pef
+    private final SettingGroup sgGeneral = this.settings.getDefaultGroup();  // was: psJq59YIbp3Z
 
-    private final SettingGroup sgGeneral;
-    private final Setting<Boolean> dropEmptyShulkers;
-    private final Setting<Boolean> ignoreHotbar;
-    private final Setting<ItemFilterMode> itemFilter;  // was: itemFilter (type was ItemFilterList)
-    private final Setting<List<Item>> dropItemList;
-    private final Setting<Integer> dropDelay;
-    private final Setting<Boolean> rotateDrop;
+    private final Setting<Boolean> dropEmptyShulker = sgGeneral.add(new BoolSetting.Builder() // was: SOYyh5IPg26f7F
+        .name("drop-empty-shulker").description("Allow the paver to dispose of empty shulkerboxes.").defaultValue(true).build());
+    private final Setting<Integer> shulkerGraceTicks = sgGeneral.add(new IntSetting.Builder() // was: rKbT3Ifwo
+        .name("shulker-grace-ticks")
+        .description("Ticks a shulker must appear empty before it is dropped. Prevents dropping freshly picked-up shulkers whose contents haven't synced from the server yet.")
+        .defaultValue(5).sliderRange(2, 20).visible(dropEmptyShulker::get).build());
+    private final Setting<Boolean> ignoreHotbar = sgGeneral.add(new BoolSetting.Builder() // was: r7hOYIKN2
+        .name("ignore-hotbar").description("Ignore items in the player's hotbar.").defaultValue(true).build());
+    private final Setting<ItemFilterList> itemFilter = sgGeneral.add(new EnumSetting.Builder<ItemFilterList>() // was: oZHMlTL
+        .name("item-filter").description("Whitelist keeps selected items in the inventory, Blacklist throws selected items out.")
+        .defaultValue(ItemFilterList.Whitelist).build());
+    private final Setting<List<Item>> dropList = sgGeneral.add(new ItemListSetting.Builder() // was: xQr5FhbwpQPWgIQ
+        .name("drop-item-list").description("List of items.").defaultValue(Items.NETHERRACK).build()); // was: class_1802.field_8328 (NETHERRACK)
+    private final Setting<Integer> dropDelay = sgGeneral.add(new IntSetting.Builder() // was: OMMZL1F3q
+        .name("drop-delay").description("Delay between dropping items.").defaultValue(2).sliderRange(1, 20).build());
+    private final Setting<Boolean> rotateDrop = sgGeneral.add(new BoolSetting.Builder() // was: zu3a44xDeMFMCRwm
+        .name("rotate-drop").description("Drop items behind you").defaultValue(false).build());
 
-    private int ticksSinceLastDrop = 0; // was: ydtYMNpam8iL7Z8
-    List<Item> cachedDropList;    // was: LFK4tb0B
+    private int dropTimer = 0;                                     // was: krxNb5lcQuWA
+    private final Map<Integer, Integer> emptyShulkerTicks = new HashMap<>(); // was: nt0HZnvBBp (slot -> consecutive empty ticks)
 
     public InventoryCleaner() {
         super(musheor.AUTOMATION, "inv-cleaner", "Automatically dispose of unwanted items.");
-        this.sgGeneral = this.settings.getDefaultGroup();
-        this.dropEmptyShulkers = this.sgGeneral.add(new BoolSetting.Builder()
-            .name("drop-empty-shulker")
-            .description("Allow the paver to dispose of empty shulkerboxes.")
-            .defaultValue(true).build());
-        this.ignoreHotbar = this.sgGeneral.add(new BoolSetting.Builder()
-            .name("ignore-hotbar")
-            .description("Ignore items in the player's hotbar.")
-            .defaultValue(true).build());
-        this.itemFilter = this.sgGeneral.add(new EnumSetting.Builder<ItemFilterMode>()
-            .name("item-filter")
-            .description("Whitelist keeps selected items in the inventory, Blacklist throws selected items out.")
-            .defaultValue(ItemFilterMode.BLACKLIST) // was: rPJDpX
-            .build());
-        this.dropItemList = this.sgGeneral.add(new ItemListSetting.Builder()
-            .name("drop-item-list")
-            .description("List of items.")
-            .defaultValue(new Item[]{Items.NETHERRACK})
-            .build());
-        this.dropDelay = this.sgGeneral.add(new IntSetting.Builder()
-            .name("drop-delay")
-            .description("Delay between dropping items.")
-            .defaultValue(2).sliderRange(1, 20).build());
-        this.rotateDrop = this.sgGeneral.add(new BoolSetting.Builder()
-            .name("rotate-drop")
-            .description("Drop items behind you")
-            .defaultValue(true).build());
-        this.ticksSinceLastDrop = 0;
-        this.cachedDropList = new ArrayList<Item>((Collection) this.dropItemList.get());
     }
 
     @Override
-    public WWidget getWidget(GuiTheme guiTheme) {
-        WVerticalList list = guiTheme.verticalList();
-        WButton button = (WButton) list.add((WWidget) guiTheme.button("Blacklist inventory")).widget();
-        button.action = this::blacklistCurrentInventory; // was: qfVsw28lZNgTVJ
+    public WWidget getWidget(GuiTheme theme) {
+        WVerticalList list = theme.verticalList();
+        WButton scanInventoryAndSetItems = list.add(theme.button("Blacklist inventory")).widget();
+        scanInventoryAndSetItems.action = this::scanInventoryToWhitelist;
         return list;
     }
 
     @Override
     public void onDeactivate() {
-        this.ticksSinceLastDrop = 0;
+        this.dropTimer = 0;
+        this.emptyShulkerTicks.clear();
     }
 
     @EventHandler
-    private void onTick(TickEvent.Pre pre) {
+    private void onTick(TickEvent.Pre event) { // was: FvaNWO(Pre)
         if (mc.player == null || mc.world == null) return;
-        if (WorldUtils.checkForLag()) return;
+        int firstSlot = !this.ignoreHotbar.get() ? 0 : 9;
 
-        int startSlot = ((Boolean) this.ignoreHotbar.get()) ? 9 : 0;
-        for (int i = startSlot; i < mc.player.getInventory().main.size(); ++i) {
-            if (this.ticksSinceLastDrop < (Integer) this.dropDelay.get()) {
-                ++this.ticksSinceLastDrop;
+        // Track how long each shulker slot has continuously appeared empty.
+        for (int i = firstSlot; i < mc.player.getInventory().main.size(); i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            if (stack.getItem() instanceof BlockItem bi && bi.getBlock() instanceof ShulkerBoxBlock && InventoryManager.isShulkerEmpty(stack)) {
+                this.emptyShulkerTicks.merge(i, 1, Integer::sum);
+            } else {
+                this.emptyShulkerTicks.remove(i);
+            }
+        }
+
+        for (int i = firstSlot; i < mc.player.getInventory().main.size(); i++) {
+            if (this.dropTimer < this.dropDelay.get()) {
+                this.dropTimer++;
                 return;
             }
-            ItemStack stack = mc.player.getInventory().getStack(i); // getStack(i)
 
-            // Drop empty shulker boxes
-            if (stack.getItem() instanceof BlockItem
-                    && ((BlockItem) stack.getItem()).getBlock() instanceof ShulkerBoxBlock
-                    && ((Boolean) this.dropEmptyShulkers.get())
-                    && InventoryManager.isShulkerEmpty(stack)) { // was: UgB10d(ItemStack)
-                if ((Boolean) this.rotateDrop.get()) {
-                    dropBehind(i);
+            ItemStack itemStack = mc.player.getInventory().getStack(i);
+            if (!(itemStack.getItem() instanceof BlockItem) || !(((BlockItem) itemStack.getItem()).getBlock() instanceof ShulkerBoxBlock)) {
+                if (itemStack.getItem() != Items.AIR
+                    && (this.itemFilter.get() != ItemFilterList.Whitelist || !this.dropList.get().contains(itemStack.getItem()))
+                    && (this.itemFilter.get() != ItemFilterList.Blacklist || this.dropList.get().contains(itemStack.getItem()))) {
+                    if (this.rotateDrop.get()) {
+                        this.dropBehind(i);
+                    } else {
+                        InvUtils.drop().slot(i);
+                    }
+                    this.dropTimer = 0;
+                }
+            } else if (this.dropEmptyShulker.get()
+                && InventoryManager.isShulkerEmpty(itemStack)
+                && this.emptyShulkerTicks.getOrDefault(i, 0) >= this.shulkerGraceTicks.get()) {
+                this.emptyShulkerTicks.remove(i);
+                if (this.rotateDrop.get()) {
+                    this.dropBehind(i);
                 } else {
                     InvUtils.drop().slot(i);
                 }
-                this.ticksSinceLastDrop = 0;
-            }
-
-            // Apply blacklist/whitelist filter
-            boolean shouldDrop = (this.itemFilter.get() == ItemFilterMode.BLACKLIST
-                    && ((List<?>) this.dropItemList.get()).contains(stack.getItem()))
-                || (this.itemFilter.get() == ItemFilterMode.WHITELIST
-                    && !((List<?>) this.dropItemList.get()).contains(stack.getItem()));
-
-            if (stack.isEmpty() || !shouldDrop) continue;
-
-            if ((Boolean) this.rotateDrop.get()) {
-                dropBehind(i);
-                this.ticksSinceLastDrop = 0;
-            } else {
-                InvUtils.drop().slot(i);
-                this.ticksSinceLastDrop = 0;
+                this.dropTimer = 0;
             }
         }
     }
 
-    /** Scans the current inventory and adds all item types to the blacklist. */
-    private void blacklistCurrentInventory() { // was: qfVsw28lZNgTVJ
+    /** Whitelists every item currently in the inventory (the "Blacklist inventory" button). */
+    private void scanInventoryToWhitelist() { // was: FvaNWO()
         if (mc.player == null || mc.world == null) return;
-        ((List<?>) this.dropItemList.get()).clear();
-        this.itemFilter.set(ItemFilterMode.BLACKLIST);
-        for (int i = 0; i <= mc.player.getInventory().size(); ++i) { // getSize()
-            Item item = mc.player.getInventory().getStack(i).getItem();
-            if (((List<?>) this.dropItemList.get()).contains(item)) continue;
-            ((List<Item>) this.dropItemList.get()).add(item);
+        this.dropList.get().clear();
+        this.itemFilter.set(ItemFilterList.Whitelist);
+
+        for (int i = 0; i <= mc.player.getInventory().size(); i++) {
+            Item currentItem = mc.player.getInventory().getStack(i).getItem();
+            if (!this.dropList.get().contains(currentItem)) {
+                this.dropList.get().add(currentItem);
+            }
         }
-        ChatUtils.info("Inventory scanned and blacklisted!", new Object[0]);
+        ChatUtils.info("Inventory scanned and blacklisted!");
     }
 
-    /**
-     * Temporarily turns the player 180° to drop the item behind them,
-     * then restores the original yaw.
-     */
-    private void dropBehind(int slot) { // was: mp3zoXQFKUKYj5(int)
+    /** Faces away (pitch -20) for a single drop so the item lands behind the player, then restores the yaw. */
+    private void dropBehind(int i) { // was: FvaNWO(int)
         assert mc.player != null;
-        float originalYaw = mc.player.getYaw();
-        PlayerUtils.setAutoWalkActive(false);
-        mc.player.networkHandler.sendPacket(
-            (Packet<?>) new PlayerMoveC2SPacket.LookAndOnGround(
-                WorldUtils.Direction8.getOppositeDirection(mc.player.getYaw()),
-                -20.0f,
-                mc.player.isOnGround(),
-                false));
-        InvUtils.drop().slot(slot);
-        mc.player.setYaw(originalYaw);
+        float previousYaw = mc.player.getYaw();
+        PlayerUtils.setAutoWalk(false);
+        mc.player.networkHandler.sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(
+            WorldUtils.Direction8.oppositeYaw(mc.player.getYaw()), -20.0F, mc.player.isOnGround(), false));
+        InvUtils.drop().slot(i);
+        mc.player.setYaw(previousYaw);
     }
 
-    /** Controls whether the item list is treated as a blacklist or a whitelist. */
-    public static final class ItemFilterMode extends Enum<ItemFilterMode> {
-        public static final ItemFilterMode BLACKLIST = new ItemFilterMode(); // was: rPJDpX  (ordinal 0)
-        public static final ItemFilterMode WHITELIST = new ItemFilterMode(); // was: Hp3MRJIoQ (ordinal 1)
-        private static final ItemFilterMode[] $VALUES = new ItemFilterMode[]{BLACKLIST, WHITELIST};
-
-        public static ItemFilterMode[] values()             { return (ItemFilterMode[]) $VALUES.clone(); }
-        public static ItemFilterMode valueOf(String string) { return Enum.valueOf(ItemFilterMode.class, string); }
-    }
+    /** Item filter mode. */ // was: enum ItemFilterList {FvaNWO, Q90GLXQ0Pef}
+    public enum ItemFilterList { Whitelist, Blacklist }
 }

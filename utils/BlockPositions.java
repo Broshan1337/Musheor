@@ -1,775 +1,566 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// (source class was obfuscated as obf.TKzj7u)
 package musheor.utils;
 
 import java.util.ArrayList;
+import java.util.List;
 import meteordevelopment.meteorclient.MeteorClient;
 import musheor.modules.automation.HighwayBuilder;
-import musheor.utils.WorldUtils;
+import musheor.utils.internal.HighwayLocator;
 import musheor.utils.internal.HighwayState;
 import net.minecraft.util.math.BlockPos;
 import org.jetbrains.annotations.NotNull;
 
 /**
- * Generates arrays of BlockPos for the various regions of a highway cross-section:
- * floor, ceiling, and clear-space positions, for both cardinal and diagonal directions.
- *
- * All methods take offset parameters (n = behind, n2 = ahead relative to player)
- * and return only positions relevant to the current highway direction and width.
+ * Generates the block-position patterns the HighwayBuilder places/breaks: floor,
+ * ceiling, tunnel, wall-scan, look-ahead and front-clearing zones, in both
+ * cardinal and diagonal orientations. Pure coordinate geometry (u/v rotated axes
+ * for diagonals). {@code f}/{@code b} are the forward/back extents of the window.
  */
 public class BlockPositions {
 
-    /**
-     * Returns floor positions (y = highwayY - 1) for cardinal directions (N/S/E/W).
-     * Optionally includes left/right wall positions at y = highwayY if walls are enabled.
-     *
-     * @param behind  number of blocks behind the player to include
-     * @param ahead   number of blocks ahead of the player to include
-     * @param leftWall  include left wall positions
-     * @param rightWall include right wall positions
-     */
+    /** Cardinal floor row (y-1) with optional side rails. */
     @NotNull
-    public static BlockPos[] getFloorPositions(int behind, int ahead, boolean leftWall, boolean rightWall) { // was: jOdDDFXSeWl4(int,int,boolean,boolean)
-        int halfHigh, halfLow;
-        int axisX, axisZ;  // which axis is the forward axis (1=X, 0=X component unused)
-        int forwardStart, forwardEnd, forwardStep;
-        int lateralSign;
+    public static BlockPos[] cardinalFloor(int f, int b, boolean leftRail, boolean rightRail) { // was: FvaNWO(int,int,boolean,boolean)
         HighwayState state = HighwayState.getInstance();
-        boolean hasWalls = HighwayBuilder.hasWalls();     // was: fGLoB1zTvFf
-        int width        = HighwayBuilder.getWidth();     // was: oq3TU4VRVWuh
-        WorldUtils.Direction8 dir = HighwayBuilder.getDirection(); // was: kLIvClyeu
-        int playerX = MeteorClient.mc.player.getX(); // getBlockX
-        int highwayY = state.getHighwayY();               // was: KaWPzeyl1xVKHWo
-        int playerZ = MeteorClient.mc.player.getZ(); // getBlockZ
-
-        switch (dir) {
-            case NORTH: { // was: vSouwXdh7
-                axisZ = 0; axisX = 1;
-                forwardStart = ahead;  forwardEnd = -behind; forwardStep = -1;
-                lateralSign = 1;
-                playerX = state.getAlignX(); // was: lYl0U01zxBqO9u — snapped X position
-                break;
-            }
-            case SOUTH: { // was: Q5FUNqd0ALfl
-                axisZ = 0; axisX = 1;
-                forwardStart = -ahead; forwardEnd = behind; forwardStep = 1;
-                lateralSign = -1;
-                playerX = state.getAlignX();
-                break;
-            }
-            case WEST: { // was: S8iuqKQCrJM02b — note: mapped as "WEST" by ordinal but acts as +X forward
-                axisZ = 1; axisX = 0;
-                forwardStart = -ahead; forwardEnd = behind; forwardStep = 1;
-                lateralSign = 1;
-                playerZ = state.getAlignZ(); // was: U6GoOdyLiE04 — snapped Z position
-                break;
-            }
-            case EAST: { // was: v5UhyO9eEd7n — acts as -X forward
-                axisZ = 1; axisX = 0;
-                forwardStart = ahead;  forwardEnd = -behind; forwardStep = -1;
-                lateralSign = -1;
-                playerZ = state.getAlignZ();
-                break;
-            }
-            default: return new BlockPos[0];
+        boolean placeRails = HighwayBuilder.placeRails();
+        int width = HighwayBuilder.getWidth();
+        WorldUtils.Direction8 direction = HighwayBuilder.getDirection();
+        int playerX = MeteorClient.mc.player.getBlockX();
+        int playerY = state.getCenterY();
+        int playerZ = MeteorClient.mc.player.getBlockZ();
+        int dx, dz, start, end, step, sideSign;
+        switch (direction) {
+            case NORTH -> { dx = 0; dz = 1; start = b; end = -f; step = -1; sideSign = 1; playerX = state.getStartX(); }
+            case SOUTH -> { dx = 0; dz = 1; start = -b; end = f; step = 1; sideSign = -1; playerX = state.getStartX(); }
+            case EAST -> { dx = 1; dz = 0; start = -b; end = f; step = 1; sideSign = 1; playerZ = state.getStartZ(); }
+            case WEST -> { dx = 1; dz = 0; start = b; end = -f; step = -1; sideSign = -1; playerZ = state.getStartZ(); }
+            default -> { return new BlockPos[0]; }
         }
+        int leftBound, rightBound;
+        if (width % 2 == 0) { leftBound = width / 2; rightBound = leftBound - 1; }
+        else { leftBound = rightBound = (width - 1) / 2; }
 
-        // Compute lateral half-widths
-        if (width % 2 == 0) {
-            halfHigh = width / 2;
-            halfLow  = halfHigh - 1;
-        } else {
-            halfHigh = halfLow = (width - 1) / 2;
-        }
-
-        ArrayList<BlockPos> result = new ArrayList<>();
-        for (int i = forwardStart; i != forwardEnd + forwardStep; i += forwardStep) {
-            int wx, wz;
-            // Main floor strip
-            for (int lat = -halfHigh; lat <= halfLow; ++lat) {
-                wx = playerX + axisZ * i + axisX * (lat * lateralSign);
-                wz = playerZ + axisX * i + axisZ * (lat * lateralSign);
-                result.add(new BlockPos(wx, highwayY - 1, wz));
+        List<BlockPos> positions = new ArrayList<>();
+        for (int i = start; i != end + step; i += step) {
+            for (int j = -leftBound; j <= rightBound; j++) {
+                int x = playerX + dx * i + dz * j * sideSign;
+                int z = playerZ + dz * i + dx * j * sideSign;
+                positions.add(new BlockPos(x, playerY - 1, z));
             }
-            if (!hasWalls) continue;
-            // Left wall position
-            int leftX = playerX + axisZ * i + axisX * ((-halfHigh - 1) * lateralSign);
-            int leftZ = playerZ + axisX * i + axisZ * ((-halfHigh - 1) * lateralSign);
-            // Right wall position
-            int rightX = playerX + axisZ * i + axisX * ((halfLow + 1) * lateralSign);
-            int rightZ = playerZ + axisX * i + axisZ * ((halfLow + 1) * lateralSign);
-            if (leftWall)  result.add(new BlockPos(leftX,  highwayY, leftZ));
-            if (rightWall) result.add(new BlockPos(rightX, highwayY, rightZ));
+            if (placeRails) {
+                int leftRailX = playerX + dx * i + dz * (-leftBound - 1) * sideSign;
+                int leftRailZ = playerZ + dz * i + dx * (-leftBound - 1) * sideSign;
+                int rightRailX = playerX + dx * i + dz * (rightBound + 1) * sideSign;
+                int rightRailZ = playerZ + dz * i + dx * (rightBound + 1) * sideSign;
+                if (leftRail) positions.add(new BlockPos(leftRailX, playerY, leftRailZ));
+                if (rightRail) positions.add(new BlockPos(rightRailX, playerY, rightRailZ));
+            }
         }
-        return result.toArray(new BlockPos[0]);
+        return positions.toArray(new BlockPos[0]);
     }
 
-    /**
-     * Returns the positions to be cleared (air column) for cardinal directions.
-     * Height is 2 for normal mode, 3 for elytra mode.
-     *
-     * @param behind number of blocks behind the player
-     * @param ahead  number of blocks ahead of the player
-     */
-    public static BlockPos[] getClearPositions(int behind, int ahead) { // was: vgrtgn5(int,int)
-        int halfHigh, halfLow;
-        int axisX, axisZ;
-        int forwardStart, forwardEnd, forwardStep;
-        int lateralSign;
+    /** Cardinal full-height tunnel clearing zone (with optional wall columns). */
+    public static BlockPos[] cardinalTunnel(int f, int b) { // was: FvaNWO(int,int)
         HighwayState state = HighwayState.getInstance();
         int width = HighwayBuilder.getWidth();
-        int clearHeight = 2;
-        if (HighwayBuilder.getBuildMode() == HighwayBuilder.BuildMode.ELYTRA) clearHeight = 3; // was: flZYoiXwrl
-        WorldUtils.Direction8 dir = HighwayBuilder.getDirection();
-        int playerX = MeteorClient.mc.player.getX();
-        int highwayY = state.getHighwayY();
-        int playerZ = MeteorClient.mc.player.getZ();
-
-        switch (dir) {
-            case NORTH: { axisZ = 0; axisX = 1; forwardStart = ahead;  forwardEnd = -behind; forwardStep = -1; lateralSign =  1; playerX = state.getAlignX(); break; }
-            case SOUTH: { axisZ = 0; axisX = 1; forwardStart = -ahead; forwardEnd =  behind; forwardStep =  1; lateralSign = -1; playerX = state.getAlignX(); break; }
-            case WEST:  { axisZ = 1; axisX = 0; forwardStart = -ahead; forwardEnd =  behind; forwardStep =  1; lateralSign =  1; playerZ = state.getAlignZ(); break; }
-            case EAST:  { axisZ = 1; axisX = 0; forwardStart = ahead;  forwardEnd = -behind; forwardStep = -1; lateralSign = -1; playerZ = state.getAlignZ(); break; }
-            default: return new BlockPos[0];
+        int height = 2;
+        if (HighwayBuilder.getBuildMode() == HighwayBuilder.BuildMode.DIG) height = 3;
+        WorldUtils.Direction8 direction = HighwayBuilder.getDirection();
+        int playerX = MeteorClient.mc.player.getBlockX();
+        int playerY = state.getCenterY();
+        int playerZ = MeteorClient.mc.player.getBlockZ();
+        int dx, dz, start, end, step, sideSign;
+        switch (direction) {
+            case NORTH -> { dx = 0; dz = 1; start = b; end = -f; step = -1; sideSign = 1; playerX = state.getStartX(); }
+            case SOUTH -> { dx = 0; dz = 1; start = -b; end = f; step = 1; sideSign = -1; playerX = state.getStartX(); }
+            case EAST -> { dx = 1; dz = 0; start = -b; end = f; step = 1; sideSign = 1; playerZ = state.getStartZ(); }
+            case WEST -> { dx = 1; dz = 0; start = b; end = -f; step = -1; sideSign = -1; playerZ = state.getStartZ(); }
+            default -> { return new BlockPos[0]; }
         }
+        int leftBound, rightBound;
+        if (width % 2 == 0) { leftBound = width / 2; rightBound = leftBound - 1; }
+        else { leftBound = rightBound = (width - 1) / 2; }
 
-        if (width % 2 == 0) { halfHigh = width / 2; halfLow = halfHigh - 1; }
-        else                 { halfHigh = halfLow = (width - 1) / 2; }
-
-        ArrayList<BlockPos> result = new ArrayList<>();
-        for (int i = forwardStart; i != forwardEnd + forwardStep; i += forwardStep) {
-            for (int h = 0; h <= clearHeight; ++h) {
-                for (int lat = -halfHigh; lat <= halfLow; ++lat) {
-                    int wx = playerX + axisZ * i + axisX * (lat * lateralSign);
-                    int wz = playerZ + axisX * i + axisZ * (lat * lateralSign);
-                    result.add(new BlockPos(wx, highwayY + h, wz));
+        List<BlockPos> positions = new ArrayList<>();
+        for (int i = start; i != end + step; i += step) {
+            for (int j = 0; j <= height; j++) {
+                for (int k = -leftBound; k <= rightBound; k++) {
+                    int x = playerX + dx * i + dz * k * sideSign;
+                    int z = playerZ + dz * i + dx * k * sideSign;
+                    positions.add(new BlockPos(x, playerY + j, z));
                 }
-                if (!HighwayBuilder.hasWalls() || h <= 0) continue; // was: CduCWLxmO
-                // Include wall blocks in clear zone
-                int leftX  = playerX + axisZ * i + axisX * ((-halfHigh - 1) * lateralSign);
-                int leftZ  = playerZ + axisX * i + axisZ * ((-halfHigh - 1) * lateralSign);
-                int rightX = playerX + axisZ * i + axisX * ((halfLow  + 1) * lateralSign);
-                int rightZ = playerZ + axisX * i + axisZ * ((halfLow  + 1) * lateralSign);
-                result.add(new BlockPos(leftX,  highwayY + h, leftZ));
-                result.add(new BlockPos(rightX, highwayY + h, rightZ));
-            }
-        }
-        return result.toArray(new BlockPos[0]);
-    }
-
-    /**
-     * Returns ceiling positions (y = playerY + 3) for cardinal directions.
-     * Used for ceiling highways (build above the player).
-     */
-    public static BlockPos[] getCeilingPositions(int behind, int ahead, boolean leftWall, boolean rightWall) { // was: mp3zoXQFKUKYj5(int,int,boolean,boolean)
-        int halfHigh, halfLow;
-        int axisX, axisZ;
-        int forwardStart, forwardEnd, forwardStep;
-        int lateralSign;
-        HighwayState state = HighwayState.getInstance();
-        boolean hasWalls = HighwayBuilder.hasWalls();
-        int width = HighwayBuilder.getWidth();
-        assert (MeteorClient.mc.player != null);
-        int playerX = MeteorClient.mc.player.getX();
-        int playerY = MeteorClient.mc.player.getY();
-        int playerZ = MeteorClient.mc.player.getZ();
-        int ceilY = playerY + 3;
-
-        if (width % 2 == 0) { halfHigh = width / 2; halfLow = halfHigh - 1; }
-        else                 { halfHigh = halfLow = (width - 1) / 2; }
-
-        WorldUtils.Direction8 dir = HighwayBuilder.getDirection();
-        switch (dir) {
-            case NORTH: { axisZ = 0; axisX = 1; forwardStart = ahead;  forwardEnd = -behind; forwardStep = -1; lateralSign =  1; playerX = state.getAlignX(); break; }
-            case SOUTH: { axisZ = 0; axisX = 1; forwardStart = -ahead; forwardEnd =  behind; forwardStep =  1; lateralSign = -1; playerX = state.getAlignX(); break; }
-            case WEST:  { axisZ = 1; axisX = 0; forwardStart = -ahead; forwardEnd =  behind; forwardStep =  1; lateralSign =  1; playerZ = state.getAlignZ(); break; }
-            case EAST:  { axisZ = 1; axisX = 0; forwardStart = ahead;  forwardEnd = -behind; forwardStep = -1; lateralSign = -1; playerZ = state.getAlignZ(); break; }
-            default: return new BlockPos[0];
-        }
-
-        ArrayList<BlockPos> result = new ArrayList<>();
-        for (int i = forwardStart; i != forwardEnd + forwardStep; i += forwardStep) {
-            // Main ceiling strip
-            for (int lat = -halfHigh; lat <= halfLow; ++lat) {
-                int wx = playerX + axisZ * i + axisX * (lat * lateralSign);
-                int wz = playerZ + axisX * i + axisZ * (lat * lateralSign);
-                result.add(new BlockPos(wx, ceilY, wz));
-            }
-            if (!hasWalls) continue;
-            // Left/right ceiling wall blocks
-            if (leftWall) {
-                int lx = playerX + axisZ * i + axisX * ((-halfHigh - 1) * lateralSign);
-                int lz = playerZ + axisX * i + axisZ * ((-halfHigh - 1) * lateralSign);
-                result.add(new BlockPos(lx, ceilY, lz));
-            }
-            if (rightWall) {
-                int rx = playerX + axisZ * i + axisX * ((halfLow + 1) * lateralSign);
-                int rz = playerZ + axisX * i + axisZ * ((halfLow + 1) * lateralSign);
-                result.add(new BlockPos(rx, ceilY, rz));
-            }
-        }
-        return result.toArray(new BlockPos[0]);
-    }
-
-    /**
-     * Returns floor positions (y = highwayY - 1) for diagonal directions (NE/NW/SE/SW).
-     * Uses the saved highway origin coordinates from HighwayState.
-     */
-    public static BlockPos[] getDiagonalFloorPositions(int behind, int ahead, boolean leftWall, boolean rightWall) { // was: Gt56Sj4a6BWhgB(int,int,boolean,boolean)
-        int halfHigh, halfLow;
-        int fwdX, fwdZ;    // forward direction multipliers
-        int latX, latZ;    // lateral (perpendicular) direction multipliers
-        HighwayState state = HighwayState.getInstance();
-        boolean hasWalls = HighwayBuilder.hasWalls();
-        int width = HighwayBuilder.getWidth();
-        assert (MeteorClient.mc.player != null);
-
-        // Initialize origin from player position if not set
-        if (state.getAlignStartX() == null) state.setAlignStartX(MeteorClient.mc.player.getX());
-        if (state.getHighwayY()     == null) state.setHighwayY(MeteorClient.mc.player.getY());
-        if (state.getAlignStartZ()  == null) state.setAlignStartZ(MeteorClient.mc.player.getZ());
-
-        if (width % 2 == 0) { halfHigh = width / 2; halfLow = halfHigh - 1; }
-        else                 { halfHigh = halfLow = (width - 1) / 2; }
-
-        WorldUtils.Direction8 dir = HighwayBuilder.getDirection();
-        latX = 1; latZ = 1;
-        switch (dir) {
-            case NORTH_EAST: { fwdX =  1; fwdZ =  1; break; }                       // was: aiRs4cu
-            case NORTH_WEST: { fwdX = -1; fwdZ =  1; latX = -1; break; }            // was: ZOY41p
-            case SOUTH_WEST: { fwdX = -1; fwdZ = -1; latX = -1; latZ = -1; break; } // was: E8moug3IELf8
-            case SOUTH_EAST: { fwdX =  1; fwdZ = -1; latZ = -1; break; }            // was: CsEhJrV
-            default: return new BlockPos[0];
-        }
-
-        ArrayList<BlockPos> result = new ArrayList<>();
-        for (int i = ahead; i >= -behind; --i) {
-            // Along-Z strip (perpendicular in Z, forward in X)
-            for (int lat = 1; lat <= halfHigh; ++lat) {
-                int wx = state.getAlignStartX() + fwdX * i;
-                int wz = state.getAlignStartZ() + fwdZ * i + lat * latZ;
-                result.add(new BlockPos(wx, state.getHighwayY() - 1, wz));
-            }
-            if (hasWalls && leftWall) {
-                int wx = state.getAlignStartX() + fwdX * i;
-                int wz = state.getAlignStartZ() + fwdZ * i + (halfHigh + 1) * latZ;
-                result.add(new BlockPos(wx, state.getHighwayY().intValue(), wz));
-            }
-            // Along-X strip (perpendicular in X, forward in Z)
-            for (int lat = 0; lat <= halfLow; ++lat) {
-                int wx = state.getAlignStartX() + fwdX * i + lat * latX;
-                int wz = state.getAlignStartZ() + fwdZ * i;
-                result.add(new BlockPos(wx, state.getHighwayY() - 1, wz));
-            }
-            if (!hasWalls || !rightWall) continue;
-            int wx = state.getAlignStartX() + fwdX * i + (halfLow + 1) * latX;
-            int wz = state.getAlignStartZ() + fwdZ * i;
-            result.add(new BlockPos(wx, state.getHighwayY().intValue(), wz));
-        }
-        return result.toArray(new BlockPos[0]);
-    }
-
-    /**
-     * Returns ceiling positions (y = highwayY + 3) for diagonal directions.
-     */
-    public static BlockPos[] getDiagonalCeilingPositions(int behind, int ahead, boolean leftWall, boolean rightWall) { // was: TAdu5cndwWu3A1(int,int,boolean,boolean)
-        int halfHigh, halfLow;
-        int fwdX, fwdZ, latX, latZ;
-        HighwayState state = HighwayState.getInstance();
-        boolean hasWalls = HighwayBuilder.hasWalls();
-        int width = HighwayBuilder.getWidth();
-        assert (MeteorClient.mc.player != null);
-
-        if (state.getAlignStartX() == null) state.setAlignStartX(MeteorClient.mc.player.getX());
-        if (state.getHighwayY()     == null) state.setHighwayY(MeteorClient.mc.player.getY());
-        if (state.getAlignStartZ()  == null) state.setAlignStartZ(MeteorClient.mc.player.getZ());
-
-        int ceilY = state.getHighwayY() + 3;
-
-        if (width % 2 == 0) { halfHigh = width / 2; halfLow = halfHigh - 1; }
-        else                 { halfHigh = halfLow = (width - 1) / 2; }
-
-        WorldUtils.Direction8 dir = HighwayBuilder.getDirection();
-        latX = 1; latZ = 1;
-        switch (dir) {
-            case NORTH_EAST: { fwdX =  1; fwdZ =  1; break; }
-            case NORTH_WEST: { fwdX = -1; fwdZ =  1; latX = -1; break; }
-            case SOUTH_WEST: { fwdX = -1; fwdZ = -1; latX = -1; latZ = -1; break; }
-            case SOUTH_EAST: { fwdX =  1; fwdZ = -1; latZ = -1; break; }
-            default: return new BlockPos[0];
-        }
-
-        ArrayList<BlockPos> result = new ArrayList<>();
-        for (int i = ahead; i >= -behind; --i) {
-            for (int lat = 1; lat <= halfHigh; ++lat) {
-                int wx = state.getAlignStartX() + fwdX * i;
-                int wz = state.getAlignStartZ() + fwdZ * i + lat * latZ;
-                result.add(new BlockPos(wx, ceilY, wz));
-            }
-            if (hasWalls && leftWall) {
-                int wx = state.getAlignStartX() + fwdX * i;
-                int wz = state.getAlignStartZ() + fwdZ * i + (halfHigh + 1) * latZ;
-                result.add(new BlockPos(wx, ceilY, wz));
-            }
-            for (int lat = 0; lat <= halfLow; ++lat) {
-                int wx = state.getAlignStartX() + fwdX * i + lat * latX;
-                int wz = state.getAlignStartZ() + fwdZ * i;
-                result.add(new BlockPos(wx, ceilY, wz));
-            }
-            if (!hasWalls || !rightWall) continue;
-            int wx = state.getAlignStartX() + fwdX * i + (halfLow + 1) * latX;
-            int wz = state.getAlignStartZ() + fwdZ * i;
-            result.add(new BlockPos(wx, ceilY, wz));
-        }
-        return result.toArray(new BlockPos[0]);
-    }
-
-    /**
-     * Returns clear-space positions (air column) for diagonal directions.
-     * Height is 2 for normal mode, 3 for elytra mode.
-     */
-    public static BlockPos[] getDiagonalClearPositions(int behind, int ahead) { // was: VYEwzRq(int,int)
-        int halfHigh, halfLow;
-        int fwdX, fwdZ, latX, latZ;
-        HighwayState state = HighwayState.getInstance();
-        int width = HighwayBuilder.getWidth();
-        int clearHeight = 2;
-        if (HighwayBuilder.getBuildMode() == HighwayBuilder.BuildMode.ELYTRA) clearHeight = 3;
-
-        if (state.getAlignStartX() == null) state.setAlignStartX(MeteorClient.mc.player.getX());
-        if (state.getHighwayY()     == null) state.setHighwayY(MeteorClient.mc.player.getY());
-        if (state.getAlignStartZ()  == null) state.setAlignStartZ(MeteorClient.mc.player.getZ());
-
-        if (width % 2 == 0) { halfHigh = width / 2; halfLow = halfHigh - 1; }
-        else                 { halfHigh = halfLow = (width - 1) / 2; }
-
-        WorldUtils.Direction8 dir = HighwayBuilder.getDirection();
-        latX = 1; latZ = 1;
-        switch (dir) {
-            case NORTH_EAST: { fwdX =  1; fwdZ =  1; break; }
-            case NORTH_WEST: { fwdX = -1; fwdZ =  1; latX = -1; break; }
-            case SOUTH_WEST: { fwdX = -1; fwdZ = -1; latX = -1; latZ = -1; break; }
-            case SOUTH_EAST: { fwdX =  1; fwdZ = -1; latZ = -1; break; }
-            default: return new BlockPos[0];
-        }
-
-        ArrayList<BlockPos> result = new ArrayList<>();
-        for (int i = ahead; i >= -behind; --i) {
-            for (int h = 0; h <= clearHeight; ++h) {
-                // Z-perpendicular arm
-                for (int lat = 1; lat <= halfHigh; ++lat) {
-                    int wx = state.getAlignStartX() + fwdX * i;
-                    int wz = state.getAlignStartZ() + fwdZ * i + lat * latZ;
-                    result.add(new BlockPos(wx, state.getHighwayY() + h, wz));
+                if (HighwayBuilder.mineAboveRails() && j > 0) {
+                    int leftRailX = playerX + dx * i + dz * (-leftBound - 1) * sideSign;
+                    int leftRailZ = playerZ + dz * i + dx * (-leftBound - 1) * sideSign;
+                    int rightRailX = playerX + dx * i + dz * (rightBound + 1) * sideSign;
+                    int rightRailZ = playerZ + dz * i + dx * (rightBound + 1) * sideSign;
+                    positions.add(new BlockPos(leftRailX, playerY + j, leftRailZ));
+                    positions.add(new BlockPos(rightRailX, playerY + j, rightRailZ));
                 }
-                if (HighwayBuilder.hasWalls() && h > 0) {
-                    int wx = state.getAlignStartX() + fwdX * i;
-                    int wz = state.getAlignStartZ() + fwdZ * i + (halfHigh + 1) * latZ;
-                    result.add(new BlockPos(wx, state.getHighwayY() + h, wz));
-                }
-                // X-perpendicular arm
-                for (int lat = 0; lat <= halfLow; ++lat) {
-                    int wx = state.getAlignStartX() + fwdX * i + lat * latX;
-                    int wz = state.getAlignStartZ() + fwdZ * i;
-                    result.add(new BlockPos(wx, state.getHighwayY() + h, wz));
-                }
-                if (!HighwayBuilder.hasWalls() || h <= 0) continue;
-                int wx = state.getAlignStartX() + fwdX * i + (halfLow + 1) * latX;
-                int wz = state.getAlignStartZ() + fwdZ * i;
-                result.add(new BlockPos(wx, state.getHighwayY() + h, wz));
             }
         }
-        return result.toArray(new BlockPos[0]);
+        return positions.toArray(new BlockPos[0]);
     }
 
-    /**
-     * Returns the clear-space positions directly ahead of the player (4-5 blocks ahead),
-     * including optional wall columns. Used by the forward-collision checker.
-     */
-    public static BlockPos[] getForwardClearPositions() { // was: IHeihwsO8p
+    /** Cardinal ceiling row (y+3) with optional rails. */
+    public static BlockPos[] cardinalCeiling(int f, int b, boolean leftRail, boolean rightRail) { // was: Q90GLXQ0Pef(int,int,boolean,boolean)
+        HighwayState state = HighwayState.getInstance();
+        boolean placeRails = HighwayBuilder.placeRails();
+        int width = HighwayBuilder.getWidth();
+        assert MeteorClient.mc.player != null;
+        int playerX = MeteorClient.mc.player.getBlockX();
+        int playerY = MeteorClient.mc.player.getBlockY();
+        int playerZ = MeteorClient.mc.player.getBlockZ();
+        int ceilingY = playerY + 3;
+        int leftBound, rightBound;
+        if (width % 2 == 0) { leftBound = width / 2; rightBound = leftBound - 1; }
+        else { leftBound = rightBound = (width - 1) / 2; }
+        WorldUtils.Direction8 direction = HighwayBuilder.getDirection();
+        int dx, dz, start, end, step, sideSign;
+        switch (direction) {
+            case NORTH -> { dx = 0; dz = 1; start = b; end = -f; step = -1; sideSign = 1; playerX = state.getStartX(); }
+            case SOUTH -> { dx = 0; dz = 1; start = -b; end = f; step = 1; sideSign = -1; playerX = state.getStartX(); }
+            case EAST -> { dx = 1; dz = 0; start = -b; end = f; step = 1; sideSign = 1; playerZ = state.getStartZ(); }
+            case WEST -> { dx = 1; dz = 0; start = b; end = -f; step = -1; sideSign = -1; playerZ = state.getStartZ(); }
+            default -> { return new BlockPos[0]; }
+        }
+        List<BlockPos> positions = new ArrayList<>();
+        for (int i = start; i != end + step; i += step) {
+            for (int j = -leftBound; j <= rightBound; j++) {
+                int x = playerX + dx * i + dz * j * sideSign;
+                int z = playerZ + dz * i + dx * j * sideSign;
+                positions.add(new BlockPos(x, ceilingY, z));
+            }
+            if (placeRails) {
+                if (leftRail) {
+                    int x = playerX + dx * i + dz * (-leftBound - 1) * sideSign;
+                    int z = playerZ + dz * i + dx * (-leftBound - 1) * sideSign;
+                    positions.add(new BlockPos(x, ceilingY, z));
+                }
+                if (rightRail) {
+                    int x = playerX + dx * i + dz * (rightBound + 1) * sideSign;
+                    int z = playerZ + dz * i + dx * (rightBound + 1) * sideSign;
+                    positions.add(new BlockPos(x, ceilingY, z));
+                }
+            }
+        }
+        return positions.toArray(new BlockPos[0]);
+    }
+
+    /** Adds diagonal cells (rotated u/v axes) whose parity matches, at height {@code y}. */
+    private static void addDiagonalCells(int vMin, int vMax, int uMin, int uMax, int K, boolean isNESW, int y, List<BlockPos> out) { // was: FvaNWO(int,int,int,int,int,boolean,int,List)
+        for (int v = vMin; v <= vMax; v++) {
+            for (int u = uMin; u <= uMax; u++) {
+                if ((u + K + v & 1) == 0) {
+                    int x = u + K + v >> 1;
+                    int z = isNESW ? u + K - v >> 1 : v - u - K >> 1;
+                    out.add(new BlockPos(x, y, z));
+                }
+            }
+        }
+    }
+
+    /** Computes {K, halfWidth, vMin, vMax, buildY, isNESW} for a diagonal window, or null. */
+    private static int[] computeDiagonalRange(HighwayState state, int f, int b) { // was: FvaNWO(HighwayState,int,int)
+        WorldUtils.Direction8 dir = HighwayBuilder.getDirection();
+        if (dir != WorldUtils.Direction8.NORTH_EAST && dir != WorldUtils.Direction8.SOUTH_WEST
+            && dir != WorldUtils.Direction8.NORTH_WEST && dir != WorldUtils.Direction8.SOUTH_EAST) {
+            return null;
+        }
+        int px = state.getCenterX();
+        int pz = state.getCenterZ();
+        boolean isNESW = dir == WorldUtils.Direction8.NORTH_EAST || dir == WorldUtils.Direction8.SOUTH_WEST;
+        HighwayLocator.Checkpoint detected = state.getCurrentCheckpoint();
+        int K = detected != null ? (int) detected.axisValue : (isNESW ? px + pz : px - pz);
+        int HW = (HighwayBuilder.getWidth() - 1) / 2;
+        int lpx = MeteorClient.mc.player.getBlockX();
+        int lpz = MeteorClient.mc.player.getBlockZ();
+        int vPlayer = isNESW ? lpx - lpz : lpx + lpz;
+        boolean vInc = dir == WorldUtils.Direction8.NORTH_EAST || dir == WorldUtils.Direction8.SOUTH_EAST;
+        int vMin = vInc ? vPlayer - 2 * b : vPlayer - 2 * f;
+        int vMax = vInc ? vPlayer + 2 * f : vPlayer + 2 * b;
+        return new int[]{K, HW, vMin, vMax, state.getCenterY(), isNESW ? 1 : 0};
+    }
+
+    /** Diagonal floor cells (y-1) with optional rails. */
+    public static BlockPos[] diagonalFloor(int f, int b, boolean leftRail, boolean rightRail) { // was: psJq59YIbp3Z(int,int,boolean,boolean)
+        HighwayState state = HighwayState.getInstance();
+        assert MeteorClient.mc.player != null;
+        ensureCenter(state);
+        int[] s = computeDiagonalRange(state, f, b);
+        if (s == null) return new BlockPos[0];
+        int K = s[0], HW = s[1], vMin = s[2], vMax = s[3], py = s[4];
+        boolean isNESW = s[5] == 1;
+        List<BlockPos> positions = new ArrayList<>();
+        addDiagonalCells(vMin, vMax, -HW, HW, K, isNESW, py - 1, positions);
+        if (HighwayBuilder.placeRails()) {
+            int leftU = isNESW ? HW + 1 : -(HW + 1);
+            int rightU = isNESW ? -(HW + 1) : HW + 1;
+            if (leftRail) addDiagonalCells(vMin, vMax, leftU, leftU, K, isNESW, py, positions);
+            if (rightRail) addDiagonalCells(vMin, vMax, rightU, rightU, K, isNESW, py, positions);
+        }
+        return positions.toArray(new BlockPos[0]);
+    }
+
+    /** Diagonal ceiling cells (y+3) with optional rails. */
+    public static BlockPos[] diagonalCeiling(int f, int b, boolean leftRail, boolean rightRail) { // was: SOYyh5IPg26f7F(int,int,boolean,boolean)
+        HighwayState state = HighwayState.getInstance();
+        assert MeteorClient.mc.player != null;
+        ensureCenter(state);
+        int[] s = computeDiagonalRange(state, f, b);
+        if (s == null) return new BlockPos[0];
+        int K = s[0], HW = s[1], vMin = s[2], vMax = s[3], py = s[4];
+        boolean isNESW = s[5] == 1;
+        int ceilingY = py + 3;
+        List<BlockPos> positions = new ArrayList<>();
+        addDiagonalCells(vMin, vMax, -HW, HW, K, isNESW, ceilingY, positions);
+        if (HighwayBuilder.placeRails()) {
+            int leftU = isNESW ? HW + 1 : -(HW + 1);
+            int rightU = isNESW ? -(HW + 1) : HW + 1;
+            if (leftRail) addDiagonalCells(vMin, vMax, leftU, leftU, K, isNESW, ceilingY, positions);
+            if (rightRail) addDiagonalCells(vMin, vMax, rightU, rightU, K, isNESW, ceilingY, positions);
+        }
+        return positions.toArray(new BlockPos[0]);
+    }
+
+    /** Diagonal full-height tunnel clearing zone (with optional wall columns). */
+    public static BlockPos[] diagonalTunnel(int f, int b) { // was: Q90GLXQ0Pef(int,int)
+        HighwayState state = HighwayState.getInstance();
+        int height = 2;
+        if (HighwayBuilder.getBuildMode() == HighwayBuilder.BuildMode.DIG) height = 3;
+        ensureCenter(state);
+        int[] s = computeDiagonalRange(state, f, b);
+        if (s == null) return new BlockPos[0];
+        int K = s[0], HW = s[1], vMin = s[2], vMax = s[3], py = s[4];
+        boolean isNESW = s[5] == 1;
+        List<BlockPos> positions = new ArrayList<>();
+        for (int j = 0; j <= height; j++) {
+            addDiagonalCells(vMin, vMax, -HW, HW, K, isNESW, py + j, positions);
+            if (HighwayBuilder.mineAboveRails() && j > 0) {
+                addDiagonalCells(vMin, vMax, -(HW + 1), -(HW + 1), K, isNESW, py + j, positions);
+                addDiagonalCells(vMin, vMax, HW + 1, HW + 1, K, isNESW, py + j, positions);
+            }
+        }
+        return positions.toArray(new BlockPos[0]);
+    }
+
+    /** Cardinal wall-scan zone (looks a short way ahead at full width+1, both walls). */
+    public static BlockPos[] cardinalWallScan() { // was: FvaNWO()
         HighwayState state = HighwayState.getInstance();
         int width = HighwayBuilder.getWidth();
+        int leftBound = 0, rightBound;
         if (HighwayBuilder.getDirection() == null) return new BlockPos[0];
-        assert (MeteorClient.mc.player != null);
-
-        if (state.getAlignStartX() == null) state.setAlignStartX(MeteorClient.mc.player.getX());
-        if (state.getHighwayY()     == null) state.setHighwayY(MeteorClient.mc.player.getY());
-        if (state.getAlignStartZ()  == null) state.setAlignStartZ(MeteorClient.mc.player.getZ());
-
-        int halfHigh, halfLow;
-        if (width % 2 == 0) { halfHigh = width / 2 + 1; halfLow = halfHigh - 1; }
-        else                 { halfHigh = halfLow = (width - 1) / 2 + 1; }
-
-        int clearHeight = 2;
-        int scanDepth   = 4; // 4 blocks ahead
-
+        assert MeteorClient.mc.player != null;
+        ensureCenter(state);
+        if (width % 2 == 0) leftBound = width / 2 + 1;
+        rightBound = leftBound - 1;
+        if (width % 2 != 0) leftBound = rightBound = (width - 1) / 2 + 1;
+        int height = 2, length = 4;
+        int cx = state.getCenterX(), cy = state.getCenterY(), cz = state.getCenterZ();
+        int px = MeteorClient.mc.player.getBlockX(), pz = MeteorClient.mc.player.getBlockZ();
         return switch (HighwayBuilder.getDirection()) {
-            case NORTH -> { // was: vSouwXdh7
-                ArrayList<BlockPos> list = new ArrayList<>();
-                if (HighwayBuilder.hasWalls()) {
-                    for (int fwd = scanDepth; fwd > 0; --fwd) {
-                        for (int h = 0; h < clearHeight; ++h) {
-                            list.add(new BlockPos(state.getAlignStartX() - halfHigh, state.getHighwayY() + h + 1, MeteorClient.mc.player.getZ() + fwd));
-                            list.add(new BlockPos(state.getAlignStartX() + halfLow,  state.getHighwayY() + h + 1, MeteorClient.mc.player.getZ() + fwd));
+            case NORTH -> {
+                List<BlockPos> positions = new ArrayList<>();
+                if (HighwayBuilder.mineAboveRails())
+                    for (int i = length; i > 0; i--)
+                        for (int k = 0; k < height; k++) {
+                            positions.add(new BlockPos(cx - leftBound, cy + k + 1, pz + i));
+                            positions.add(new BlockPos(cx + rightBound, cy + k + 1, pz + i));
                         }
-                    }
-                }
-                for (int fwd = scanDepth; fwd > 0; --fwd) {
-                    for (int lat = -halfHigh + 1; lat < halfLow; ++lat) {
-                        for (int h = 0; h <= clearHeight; ++h) {
-                            list.add(new BlockPos(state.getAlignStartX() + lat, state.getHighwayY() + h, MeteorClient.mc.player.getZ() + fwd));
-                        }
-                    }
-                }
-                yield list.toArray(new BlockPos[0]);
+                for (int i = length; i > 0; i--)
+                    for (int j = -leftBound + 1; j < rightBound; j++)
+                        for (int k = 0; k <= height; k++)
+                            positions.add(new BlockPos(cx + j, cy + k, pz + i));
+                yield positions.toArray(new BlockPos[0]);
             }
-            case WEST -> { // was: S8iuqKQCrJM02b
-                ArrayList<BlockPos> list = new ArrayList<>();
-                if (HighwayBuilder.hasWalls()) {
-                    for (int fwd = -scanDepth; fwd < 0; ++fwd) {
-                        for (int h = 0; h < clearHeight; ++h) {
-                            list.add(new BlockPos(MeteorClient.mc.player.getX() + fwd, state.getHighwayY() + h + 1, state.getAlignStartZ() - halfHigh));
-                            list.add(new BlockPos(MeteorClient.mc.player.getX() + fwd, state.getHighwayY() + h + 1, state.getAlignStartZ() + halfLow));
+            case SOUTH -> {
+                List<BlockPos> positions = new ArrayList<>();
+                if (HighwayBuilder.mineAboveRails())
+                    for (int i = -length; i < 0; i++)
+                        for (int k = 0; k < height; k++) {
+                            positions.add(new BlockPos(cx + leftBound, cy + k + 1, pz + i));
+                            positions.add(new BlockPos(cx - rightBound, cy + k + 1, pz + i));
                         }
-                    }
-                }
-                for (int fwd = -scanDepth; fwd < 0; ++fwd) {
-                    for (int lat = -halfHigh + 1; lat < halfLow; ++lat) {
-                        for (int h = 0; h <= clearHeight; ++h) {
-                            list.add(new BlockPos(MeteorClient.mc.player.getX() + fwd, state.getHighwayY() + h, state.getAlignStartZ() + lat));
-                        }
-                    }
-                }
-                yield list.toArray(new BlockPos[0]);
+                for (int i = -length; i < 0; i++)
+                    for (int j = leftBound - 1; j > -rightBound; j--)
+                        for (int k = 0; k <= height; k++)
+                            positions.add(new BlockPos(cx + j, cy + k, pz + i));
+                yield positions.toArray(new BlockPos[0]);
             }
-            case SOUTH -> { // was: Q5FUNqd0ALfl
-                ArrayList<BlockPos> list = new ArrayList<>();
-                if (HighwayBuilder.hasWalls()) {
-                    for (int fwd = -scanDepth; fwd < 0; ++fwd) {
-                        for (int h = 0; h < clearHeight; ++h) {
-                            list.add(new BlockPos(state.getAlignStartX() + halfHigh, state.getHighwayY() + h + 1, MeteorClient.mc.player.getZ() + fwd));
-                            list.add(new BlockPos(state.getAlignStartX() - halfLow,  state.getHighwayY() + h + 1, MeteorClient.mc.player.getZ() + fwd));
+            case EAST -> {
+                List<BlockPos> positions = new ArrayList<>();
+                if (HighwayBuilder.mineAboveRails())
+                    for (int i = -length; i < 0; i++)
+                        for (int k = 0; k < height; k++) {
+                            positions.add(new BlockPos(cx + i, cy + k + 1, pz - leftBound));
+                            positions.add(new BlockPos(cx + i, cy + k + 1, pz + rightBound));
                         }
-                    }
-                }
-                for (int fwd = -scanDepth; fwd < 0; ++fwd) {
-                    for (int lat = halfHigh - 1; lat > -halfLow; --lat) {
-                        for (int h = 0; h <= clearHeight; ++h) {
-                            list.add(new BlockPos(state.getAlignStartX() + lat, state.getHighwayY() + h, MeteorClient.mc.player.getZ() + fwd));
-                        }
-                    }
-                }
-                yield list.toArray(new BlockPos[0]);
+                for (int i = -length; i < 0; i++)
+                    for (int j = -leftBound + 1; j < rightBound; j++)
+                        for (int k = 0; k <= height; k++)
+                            positions.add(new BlockPos(px + i, cy + k, cz + j));
+                yield positions.toArray(new BlockPos[0]);
             }
-            case EAST -> { // was: v5UhyO9eEd7n
-                ArrayList<BlockPos> list = new ArrayList<>();
-                if (HighwayBuilder.hasWalls()) {
-                    for (int fwd = scanDepth; fwd > 0; --fwd) {
-                        for (int h = 0; h < clearHeight; ++h) {
-                            list.add(new BlockPos(MeteorClient.mc.player.getX() + fwd, state.getHighwayY() + h + 1, state.getAlignStartZ() + halfHigh));
-                            list.add(new BlockPos(MeteorClient.mc.player.getX() + fwd, state.getHighwayY() + h + 1, state.getAlignStartZ() - halfLow));
+            case WEST -> {
+                List<BlockPos> positions = new ArrayList<>();
+                if (HighwayBuilder.mineAboveRails())
+                    for (int i = length; i > 0; i--)
+                        for (int k = 0; k < height; k++) {
+                            positions.add(new BlockPos(px + i, cy + k + 1, cz + leftBound));
+                            positions.add(new BlockPos(px + i, cy + k + 1, cz - rightBound));
                         }
-                    }
-                }
-                for (int fwd = scanDepth; fwd > 0; --fwd) {
-                    for (int lat = halfHigh - 1; lat > -halfLow; --lat) {
-                        for (int h = 0; h <= clearHeight; ++h) {
-                            list.add(new BlockPos(MeteorClient.mc.player.getX() + fwd, state.getHighwayY() + h, state.getAlignStartZ() + lat));
-                        }
-                    }
-                }
-                yield list.toArray(new BlockPos[0]);
+                for (int i = length; i > 0; i--)
+                    for (int j = leftBound - 1; j > -rightBound; j--)
+                        for (int k = 0; k <= height; k++)
+                            positions.add(new BlockPos(px + i, cy + k, cz + j));
+                yield positions.toArray(new BlockPos[0]);
             }
-            default -> new BlockPos[]{};
+            default -> new BlockPos[0];
         };
     }
 
-    /**
-     * Returns floor positions 4-7 blocks ahead (pavement positions about to be walked on).
-     * Used to identify blocks that need placing before the player reaches them.
-     */
-    public static BlockPos[] getPavementPositionsAhead() { // was: PoixtDMvQM
+    /** Cardinal floor look-ahead row (i = 4..7 ahead), used for pre-paving. */
+    public static BlockPos[] cardinalFloorAhead() { // was: Q90GLXQ0Pef()
         HighwayState state = HighwayState.getInstance();
         int width = HighwayBuilder.getWidth();
+        int leftBound = 0, rightBound;
         if (HighwayBuilder.getDirection() == null) return new BlockPos[0];
-        assert (MeteorClient.mc.player != null);
-
-        if (state.getAlignStartX() == null) state.setAlignStartX(MeteorClient.mc.player.getX());
-        if (state.getHighwayY()     == null) state.setHighwayY(MeteorClient.mc.player.getY());
-        if (state.getAlignStartZ()  == null) state.setAlignStartZ(MeteorClient.mc.player.getZ());
-
-        int halfHigh, halfLow;
-        if (width % 2 == 0) { halfHigh = halfLow = width / 2; }
-        else                 { halfHigh = halfLow = (width - 1) / 2; }
-
+        assert MeteorClient.mc.player != null;
+        ensureCenter(state);
+        if (width % 2 == 0) leftBound = width / 2;
+        rightBound = leftBound - 1;
+        if (width % 2 != 0) leftBound = rightBound = (width - 1) / 2;
+        int cx = state.getCenterX(), cy = state.getCenterY(), cz = state.getCenterZ();
         return switch (HighwayBuilder.getDirection()) {
-            case NORTH -> { // was: vSouwXdh7 — looking toward +Z
-                ArrayList<BlockPos> list = new ArrayList<>();
-                for (int fwd = 4; fwd <= 7; ++fwd) {
-                    int z = state.getAlignStartZ() + fwd;
-                    for (int lat = -halfHigh; lat < halfLow; ++lat) {
-                        list.add(new BlockPos(state.getAlignStartX() + lat, state.getHighwayY() - 1, z));
+            case NORTH -> {
+                List<BlockPos> positions = new ArrayList<>();
+                for (int i = 4; i <= 7; i++) {
+                    int z = cz + i;
+                    for (int j = -leftBound; j < rightBound; j++) positions.add(new BlockPos(cx + j, cy - 1, z));
+                    if (HighwayBuilder.placeRails()) {
+                        positions.add(new BlockPos(cx - leftBound - 1, cy, z));
+                        positions.add(new BlockPos(cx + rightBound + 1, cy, z));
                     }
-                    if (!HighwayBuilder.hasWalls()) continue;
-                    list.add(new BlockPos(state.getAlignStartX() - halfHigh - 1, state.getHighwayY().intValue(), z));
-                    list.add(new BlockPos(state.getAlignStartX() + halfLow  + 1, state.getHighwayY().intValue(), z));
                 }
-                yield list.toArray(new BlockPos[0]);
+                yield positions.toArray(new BlockPos[0]);
             }
-            case WEST -> { // was: S8iuqKQCrJM02b — looking toward -X
-                ArrayList<BlockPos> list = new ArrayList<>();
-                for (int fwd = 4; fwd <= 7; ++fwd) {
-                    int x = state.getAlignStartX() - fwd;
-                    for (int lat = -halfHigh; lat < halfLow; ++lat) {
-                        list.add(new BlockPos(x, state.getHighwayY() - 1, state.getAlignStartZ() + lat));
+            case SOUTH -> {
+                List<BlockPos> positions = new ArrayList<>();
+                for (int i = 4; i <= 7; i++) {
+                    int z = cz - i;
+                    for (int j = leftBound; j > -rightBound; j--) positions.add(new BlockPos(cx + j, cy - 1, z));
+                    if (HighwayBuilder.placeRails()) {
+                        positions.add(new BlockPos(cx + leftBound + 1, cy, z));
+                        positions.add(new BlockPos(cx - rightBound - 1, cy, z));
                     }
-                    if (!HighwayBuilder.hasWalls()) continue;
-                    list.add(new BlockPos(x, state.getHighwayY().intValue(), state.getAlignStartZ() - halfHigh - 1));
-                    list.add(new BlockPos(x, state.getHighwayY().intValue(), state.getAlignStartZ() + halfLow  + 1));
                 }
-                yield list.toArray(new BlockPos[0]);
+                yield positions.toArray(new BlockPos[0]);
             }
-            case SOUTH -> { // was: Q5FUNqd0ALfl — looking toward -Z
-                ArrayList<BlockPos> list = new ArrayList<>();
-                for (int fwd = 4; fwd <= 7; ++fwd) {
-                    int z = state.getAlignStartZ() - fwd;
-                    for (int lat = halfHigh; lat > -halfLow; --lat) {
-                        list.add(new BlockPos(state.getAlignStartX() + lat, state.getHighwayY() - 1, z));
+            case EAST -> {
+                List<BlockPos> positions = new ArrayList<>();
+                for (int i = 4; i <= 7; i++) {
+                    int x = cx - i;
+                    for (int j = -leftBound; j < rightBound; j++) positions.add(new BlockPos(x, cy - 1, cz + j));
+                    if (HighwayBuilder.placeRails()) {
+                        positions.add(new BlockPos(x, cy, cz - leftBound - 1));
+                        positions.add(new BlockPos(x, cy, cz + rightBound + 1));
                     }
-                    if (!HighwayBuilder.hasWalls()) continue;
-                    list.add(new BlockPos(state.getAlignStartX() + halfHigh + 1, state.getHighwayY().intValue(), z));
-                    list.add(new BlockPos(state.getAlignStartX() - halfLow  - 1, state.getHighwayY().intValue(), z));
                 }
-                yield list.toArray(new BlockPos[0]);
+                yield positions.toArray(new BlockPos[0]);
             }
-            case EAST -> { // was: v5UhyO9eEd7n — looking toward +X
-                ArrayList<BlockPos> list = new ArrayList<>();
-                for (int fwd = 4; fwd <= 7; ++fwd) {
-                    int x = state.getAlignStartX() + fwd;
-                    for (int lat = halfHigh; lat > -halfLow; --lat) {
-                        list.add(new BlockPos(x, state.getHighwayY() - 1, state.getAlignStartZ() + lat));
+            case WEST -> {
+                List<BlockPos> positions = new ArrayList<>();
+                for (int i = 4; i <= 7; i++) {
+                    int x = cx + i;
+                    for (int j = leftBound; j > -rightBound; j--) positions.add(new BlockPos(x, cy - 1, cz + j));
+                    if (HighwayBuilder.placeRails()) {
+                        positions.add(new BlockPos(x, cy, cz + leftBound + 1));
+                        positions.add(new BlockPos(x, cy, cz - rightBound - 1));
                     }
-                    if (!HighwayBuilder.hasWalls()) continue;
-                    list.add(new BlockPos(x, state.getHighwayY().intValue(), state.getAlignStartZ() + halfHigh + 1));
-                    list.add(new BlockPos(x, state.getHighwayY().intValue(), state.getAlignStartZ() - halfLow  - 1));
                 }
-                yield list.toArray(new BlockPos[0]);
+                yield positions.toArray(new BlockPos[0]);
             }
-            default -> new BlockPos[]{};
+            default -> new BlockPos[0];
         };
     }
 
-    /**
-     * Returns obstruction-scan positions 0-10 blocks behind the player for cardinal directions.
-     * Used by WorldUtils.handleLavaRemoval() to detect lava that must be removed.
-     */
-    public static BlockPos[] getCardinalObstructionPositions() { // was: txFOGrboKBXQp
+    /** Cardinal front-clearing zone (i = 0..-10, full height) — scanned for obstructing lava. */
+    public static BlockPos[] cardinalFrontRow() { // was: psJq59YIbp3Z()
         HighwayState state = HighwayState.getInstance();
         int width = HighwayBuilder.getWidth();
+        int leftBound = 0, rightBound;
         if (HighwayBuilder.getDirection() == null) return new BlockPos[0];
-        assert (MeteorClient.mc.player != null);
-
-        if (state.getAlignStartX() == null) state.setAlignStartX(MeteorClient.mc.player.getX());
-        if (state.getHighwayY()     == null) state.setHighwayY(MeteorClient.mc.player.getY());
-        if (state.getAlignStartZ()  == null) state.setAlignStartZ(MeteorClient.mc.player.getZ());
-
-        int halfHigh, halfLow;
-        if (width % 2 == 0) { halfHigh = width / 2 + 1; halfLow = halfHigh - 1; }
-        else                 { halfHigh = halfLow = (width - 1) / 2 + 1; }
-
-        int clearHeight = 0;
-        if (HighwayBuilder.getBuildMode() == HighwayBuilder.BuildMode.NORMAL) clearHeight = 3;
-        if (HighwayBuilder.getBuildMode() == HighwayBuilder.BuildMode.ELYTRA) clearHeight = 4;
-
+        assert MeteorClient.mc.player != null;
+        ensureCenter(state);
+        if (width % 2 == 0) leftBound = width / 2 + 1;
+        rightBound = leftBound - 1;
+        if (width % 2 != 0) leftBound = rightBound = (width - 1) / 2 + 1;
+        int height = 0;
+        if (HighwayBuilder.getBuildMode() == HighwayBuilder.BuildMode.PAVE) height = 3;
+        if (HighwayBuilder.getBuildMode() == HighwayBuilder.BuildMode.DIG) height = 4;
+        int cx = state.getCenterX(), cy = state.getCenterY(), cz = state.getCenterZ();
+        int px = MeteorClient.mc.player.getBlockX(), pz = MeteorClient.mc.player.getBlockZ();
         return switch (HighwayBuilder.getDirection()) {
-            case NORTH -> { // was: vSouwXdh7
-                ArrayList<BlockPos> list = new ArrayList<>();
-                if (HighwayBuilder.hasWalls()) {
-                    for (int off = 0; off > -10; --off) {
-                        for (int h = 0; h < clearHeight; ++h) {
-                            list.add(new BlockPos(state.getAlignStartX() - halfHigh - 1, state.getHighwayY() + h + 1, MeteorClient.mc.player.getZ() + off));
-                            list.add(new BlockPos(state.getAlignStartX() + halfLow  + 1, state.getHighwayY() + h + 1, MeteorClient.mc.player.getZ() + off));
-                            list.add(new BlockPos(state.getAlignStartX() - halfHigh,     state.getHighwayY() + h + 1, MeteorClient.mc.player.getZ() + off));
-                            list.add(new BlockPos(state.getAlignStartX() + halfLow,      state.getHighwayY() + h + 1, MeteorClient.mc.player.getZ() + off));
+            case NORTH -> {
+                List<BlockPos> positions = new ArrayList<>();
+                if (HighwayBuilder.mineAboveRails())
+                    for (int i = 0; i > -10; i--)
+                        for (int k = 0; k < height; k++) {
+                            positions.add(new BlockPos(cx - leftBound - 1, cy + k + 1, pz + i));
+                            positions.add(new BlockPos(cx + rightBound + 1, cy + k + 1, pz + i));
+                            positions.add(new BlockPos(cx - leftBound, cy + k + 1, pz + i));
+                            positions.add(new BlockPos(cx + rightBound, cy + k + 1, pz + i));
                         }
-                    }
-                }
-                for (int off = 0; off >= -10; --off) {
-                    for (int lat = -halfHigh; lat < halfLow; ++lat) {
-                        for (int h = 0; h <= clearHeight; ++h) {
-                            list.add(new BlockPos(state.getAlignStartX() + lat, state.getHighwayY() + h, MeteorClient.mc.player.getZ() + off));
-                        }
-                    }
-                }
-                yield list.toArray(new BlockPos[0]);
+                for (int i = 0; i >= -10; i--)
+                    for (int j = -leftBound; j < rightBound; j++)
+                        for (int k = 0; k <= height; k++)
+                            positions.add(new BlockPos(cx + j, cy + k, pz + i));
+                yield positions.toArray(new BlockPos[0]);
             }
-            case WEST -> { // was: S8iuqKQCrJM02b
-                ArrayList<BlockPos> list = new ArrayList<>();
-                for (int off = 10; off >= 0; --off) {
-                    for (int h = 0; h < clearHeight; ++h) {
-                        list.add(new BlockPos(MeteorClient.mc.player.getX() + off, state.getHighwayY() + h + 1, MeteorClient.mc.player.getZ() - halfHigh - 1));
-                        list.add(new BlockPos(MeteorClient.mc.player.getX() + off, state.getHighwayY() + h + 1, MeteorClient.mc.player.getZ() + halfLow  + 1));
-                        list.add(new BlockPos(MeteorClient.mc.player.getX() + off, state.getHighwayY() + h + 1, MeteorClient.mc.player.getZ() - halfHigh));
-                        list.add(new BlockPos(MeteorClient.mc.player.getX() + off, state.getHighwayY() + h + 1, MeteorClient.mc.player.getZ() + halfLow));
-                    }
-                }
-                for (int off = 10; off >= 0; --off) {
-                    for (int lat = -halfHigh + 1; lat < halfLow; ++lat) {
-                        for (int h = 0; h <= clearHeight; ++h) {
-                            list.add(new BlockPos(MeteorClient.mc.player.getX() + off, state.getHighwayY() + h, state.getAlignStartZ() + lat));
+            case SOUTH -> {
+                List<BlockPos> positions = new ArrayList<>();
+                if (HighwayBuilder.mineAboveRails())
+                    for (int i = 10; i >= 0; i--)
+                        for (int k = 0; k < height; k++) {
+                            positions.add(new BlockPos(cx + leftBound, cy + k + 1, pz + i));
+                            positions.add(new BlockPos(cx - rightBound, cy + k + 1, pz + i));
+                            positions.add(new BlockPos(cx + leftBound + 1, cy + k + 1, pz + i));
+                            positions.add(new BlockPos(cx - rightBound - 1, cy + k + 1, pz + i));
                         }
-                    }
-                }
-                yield list.toArray(new BlockPos[0]);
+                for (int i = 10; i >= 0; i--)
+                    for (int j = leftBound; j > -rightBound; j--)
+                        for (int k = 0; k <= height; k++)
+                            positions.add(new BlockPos(cx + j, cy + k, pz + i));
+                yield positions.toArray(new BlockPos[0]);
             }
-            case SOUTH -> { // was: Q5FUNqd0ALfl
-                ArrayList<BlockPos> list = new ArrayList<>();
-                if (HighwayBuilder.hasWalls()) {
-                    for (int off = 10; off >= 0; --off) {
-                        for (int h = 0; h < clearHeight; ++h) {
-                            list.add(new BlockPos(state.getAlignStartX() + halfHigh,     state.getHighwayY() + h + 1, MeteorClient.mc.player.getZ() + off));
-                            list.add(new BlockPos(state.getAlignStartX() - halfLow,      state.getHighwayY() + h + 1, MeteorClient.mc.player.getZ() + off));
-                            list.add(new BlockPos(state.getAlignStartX() + halfHigh + 1, state.getHighwayY() + h + 1, MeteorClient.mc.player.getZ() + off));
-                            list.add(new BlockPos(state.getAlignStartX() - halfLow  - 1, state.getHighwayY() + h + 1, MeteorClient.mc.player.getZ() + off));
-                        }
+            case EAST -> {
+                List<BlockPos> positions = new ArrayList<>();
+                for (int i = 10; i >= 0; i--)
+                    for (int k = 0; k < height; k++) {
+                        positions.add(new BlockPos(px + i, cy + k + 1, pz - leftBound - 1));
+                        positions.add(new BlockPos(px + i, cy + k + 1, pz + rightBound + 1));
+                        positions.add(new BlockPos(px + i, cy + k + 1, pz - leftBound));
+                        positions.add(new BlockPos(px + i, cy + k + 1, pz + rightBound));
                     }
-                }
-                for (int off = 10; off >= 0; --off) {
-                    for (int lat = halfHigh; lat > -halfLow; --lat) {
-                        for (int h = 0; h <= clearHeight; ++h) {
-                            list.add(new BlockPos(state.getAlignStartX() + lat, state.getHighwayY() + h, MeteorClient.mc.player.getZ() + off));
-                        }
-                    }
-                }
-                yield list.toArray(new BlockPos[0]);
+                for (int i = 10; i >= 0; i--)
+                    for (int j = -leftBound + 1; j < rightBound; j++)
+                        for (int k = 0; k <= height; k++)
+                            positions.add(new BlockPos(px + i, cy + k, cz + j));
+                yield positions.toArray(new BlockPos[0]);
             }
-            case EAST -> { // was: v5UhyO9eEd7n
-                ArrayList<BlockPos> list = new ArrayList<>();
-                if (HighwayBuilder.hasWalls()) {
-                    for (int off = -10; off <= 0; ++off) {
-                        for (int h = 0; h < clearHeight; ++h) {
-                            list.add(new BlockPos(MeteorClient.mc.player.getX() + off, state.getHighwayY() + h + 1, state.getAlignStartZ() + halfHigh));
-                            list.add(new BlockPos(MeteorClient.mc.player.getX() + off, state.getHighwayY() + h + 1, state.getAlignStartZ() - halfLow));
-                            list.add(new BlockPos(MeteorClient.mc.player.getX() + off, state.getHighwayY() + h + 1, state.getAlignStartZ() + halfHigh + 1));
-                            list.add(new BlockPos(MeteorClient.mc.player.getX() + off, state.getHighwayY() + h + 1, state.getAlignStartZ() - halfLow  - 1));
+            case WEST -> {
+                List<BlockPos> positions = new ArrayList<>();
+                if (HighwayBuilder.mineAboveRails())
+                    for (int i = -10; i <= 0; i++)
+                        for (int k = 0; k < height; k++) {
+                            positions.add(new BlockPos(px + i, cy + k + 1, cz + leftBound));
+                            positions.add(new BlockPos(px + i, cy + k + 1, cz - rightBound));
+                            positions.add(new BlockPos(px + i, cy + k + 1, cz + leftBound + 1));
+                            positions.add(new BlockPos(px + i, cy + k + 1, cz - rightBound - 1));
                         }
-                    }
-                }
-                for (int off = -10; off <= 0; ++off) {
-                    for (int lat = halfHigh; lat > -halfLow; --lat) {
-                        for (int h = 0; h <= clearHeight; ++h) {
-                            list.add(new BlockPos(MeteorClient.mc.player.getX() + off, state.getHighwayY() + h, state.getAlignStartZ() + lat));
-                        }
-                    }
-                }
-                yield list.toArray(new BlockPos[0]);
+                for (int i = -10; i <= 0; i++)
+                    for (int j = leftBound; j > -rightBound; j--)
+                        for (int k = 0; k <= height; k++)
+                            positions.add(new BlockPos(px + i, cy + k, cz + j));
+                yield positions.toArray(new BlockPos[0]);
             }
-            default -> new BlockPos[]{};
+            default -> new BlockPos[0];
         };
     }
 
-    /**
-     * Returns obstruction-scan positions for diagonal directions (3-8 blocks diagonally behind).
-     * Used by WorldUtils.handleLavaRemoval() for diagonal highways.
-     */
-    public static BlockPos[] getDiagonalObstructionPositions() { // was: HP7CUOuiyLUHkEkD
+    /** Diagonal front-clearing zone (i = -8..-3, full height) — scanned for obstructing lava. */
+    public static BlockPos[] diagonalFrontRow() { // was: SOYyh5IPg26f7F()
         HighwayState state = HighwayState.getInstance();
         int width = HighwayBuilder.getWidth();
-        int clearHeight = 0;
-        if (HighwayBuilder.getBuildMode() == HighwayBuilder.BuildMode.NORMAL) clearHeight = 3;
-        if (HighwayBuilder.getBuildMode() == HighwayBuilder.BuildMode.ELYTRA) clearHeight = 4;
-
-        int halfHigh, halfLow;
-        if (width % 2 == 0) { halfHigh = halfLow = width / 2; }
-        else                 { halfHigh = halfLow = (width - 1) / 2; }
-
-        assert (MeteorClient.mc.player != null);
-        if (state.getAlignStartX() == null) state.setAlignStartX(MeteorClient.mc.player.getX());
-        if (state.getHighwayY()     == null) state.setHighwayY(MeteorClient.mc.player.getY());
-        if (state.getAlignStartZ()  == null) state.setAlignStartZ(MeteorClient.mc.player.getZ());
-
-        WorldUtils.Direction8 dir = HighwayBuilder.getDirection();
-        return switch (dir) {
-            case NORTH_EAST -> { // was: aiRs4cu
-                ArrayList<BlockPos> list = new ArrayList<>();
-                for (int i = -8; i <= -3; ++i) {
-                    for (int h = 0; h <= clearHeight; ++h) {
-                        for (int lat = halfHigh; lat > 0; --lat)
-                            list.add(new BlockPos(state.getAlignStartX() + i, state.getHighwayY() + h, state.getAlignStartZ() + lat + i));
-                        if (h > 0) {
-                            list.add(new BlockPos(state.getAlignStartX() + i, state.getHighwayY() + h, state.getAlignStartZ() + halfHigh + 1 + i));
-                            list.add(new BlockPos(state.getAlignStartX() + i, state.getHighwayY() + h, state.getAlignStartZ() + halfHigh + 2 + i));
+        int leftBound = 0, rightBound;
+        int height = 0;
+        if (HighwayBuilder.getBuildMode() == HighwayBuilder.BuildMode.PAVE) height = 3;
+        if (HighwayBuilder.getBuildMode() == HighwayBuilder.BuildMode.DIG) height = 4;
+        if (width % 2 == 0) leftBound = width / 2;
+        rightBound = leftBound - 1;
+        if (width % 2 != 0) leftBound = rightBound = (width - 1) / 2;
+        assert MeteorClient.mc.player != null;
+        ensureCenter(state);
+        int cx = state.getCenterX(), cy = state.getCenterY(), cz = state.getCenterZ();
+        WorldUtils.Direction8 direction = HighwayBuilder.getDirection();
+        return switch (direction) {
+            case NORTH_WEST -> {
+                List<BlockPos> positions = new ArrayList<>();
+                for (int i = -8; i <= -3; i++)
+                    for (int j = 0; j <= height; j++) {
+                        for (int left = leftBound; left > 0; left--) positions.add(new BlockPos(cx + i, cy + j, cz + left + i));
+                        if (j > 0) {
+                            positions.add(new BlockPos(cx + i, cy + j, cz + leftBound + 1 + i));
+                            positions.add(new BlockPos(cx + i, cy + j, cz + leftBound + 2 + i));
                         }
-                        for (int lat = halfLow; lat >= 0; --lat)
-                            list.add(new BlockPos(state.getAlignStartX() + lat + i, state.getHighwayY() + h, state.getAlignStartZ() + i));
-                        if (h > 0) {
-                            list.add(new BlockPos(state.getAlignStartX() + halfLow + 1 + i, state.getHighwayY() + h, state.getAlignStartZ() + i));
-                            list.add(new BlockPos(state.getAlignStartX() + halfLow + 2 + i, state.getHighwayY() + h, state.getAlignStartZ() + i));
+                        for (int right = rightBound; right >= 0; right--) positions.add(new BlockPos(cx + right + i, cy + j, cz + i));
+                        if (j > 0) {
+                            positions.add(new BlockPos(cx + rightBound + 1 + i, cy + j, cz + i));
+                            positions.add(new BlockPos(cx + rightBound + 2 + i, cy + j, cz + i));
                         }
                     }
-                }
-                yield list.toArray(new BlockPos[0]);
+                yield positions.toArray(new BlockPos[0]);
             }
-            case NORTH_WEST -> { // was: ZOY41p
-                ArrayList<BlockPos> list = new ArrayList<>();
-                for (int i = -8; i <= -3; ++i) {
-                    for (int h = 0; h <= clearHeight; ++h) {
-                        for (int lat = halfHigh; lat > 0; --lat)
-                            list.add(new BlockPos(state.getAlignStartX() - i, state.getHighwayY() + h, state.getAlignStartZ() + lat + i));
-                        if (h > 0) {
-                            list.add(new BlockPos(state.getAlignStartX() - i, state.getHighwayY() + h, state.getAlignStartZ() + halfHigh + 1 + i));
-                            list.add(new BlockPos(state.getAlignStartX() - i, state.getHighwayY() + h, state.getAlignStartZ() + halfHigh + 2 + i));
+            case NORTH_EAST -> {
+                List<BlockPos> positions = new ArrayList<>();
+                for (int i = -8; i <= -3; i++)
+                    for (int j = 0; j <= height; j++) {
+                        for (int left = leftBound; left > 0; left--) positions.add(new BlockPos(cx - i, cy + j, cz + left + i));
+                        if (j > 0) {
+                            positions.add(new BlockPos(cx - i, cy + j, cz + leftBound + 1 + i));
+                            positions.add(new BlockPos(cx - i, cy + j, cz + leftBound + 2 + i));
                         }
-                        for (int lat = halfLow; lat >= 0; --lat)
-                            list.add(new BlockPos(state.getAlignStartX() - lat - i, state.getHighwayY() + h, state.getAlignStartZ() + i));
-                        if (h > 0) {
-                            list.add(new BlockPos(state.getAlignStartX() - halfLow - 1 - i, state.getHighwayY() + h, state.getAlignStartZ() + i));
-                            list.add(new BlockPos(state.getAlignStartX() - halfLow - 2 - i, state.getHighwayY() + h, state.getAlignStartZ() + i));
+                        for (int right = rightBound; right >= 0; right--) positions.add(new BlockPos(cx - right - i, cy + j, cz + i));
+                        if (j > 0) {
+                            positions.add(new BlockPos(cx - rightBound - 1 - i, cy + j, cz + i));
+                            positions.add(new BlockPos(cx - rightBound - 2 - i, cy + j, cz + i));
                         }
                     }
-                }
-                yield list.toArray(new BlockPos[0]);
+                yield positions.toArray(new BlockPos[0]);
             }
-            case SOUTH_WEST -> { // was: E8moug3IELf8
-                ArrayList<BlockPos> list = new ArrayList<>();
-                for (int i = -8; i <= -3; ++i) {
-                    for (int h = 0; h <= clearHeight; ++h) {
-                        for (int lat = halfHigh; lat > 0; --lat)
-                            list.add(new BlockPos(state.getAlignStartX() - i, state.getHighwayY() + h, state.getAlignStartZ() - lat - i));
-                        if (h > 0) {
-                            list.add(new BlockPos(state.getAlignStartX() - i, state.getHighwayY() + h, state.getAlignStartZ() - halfHigh - 1 - i));
-                            list.add(new BlockPos(state.getAlignStartX() - i, state.getHighwayY() + h, state.getAlignStartZ() - halfHigh - 2 - i));
+            case SOUTH_EAST -> {
+                List<BlockPos> positions = new ArrayList<>();
+                for (int i = -8; i <= -3; i++)
+                    for (int j = 0; j <= height; j++) {
+                        for (int left = leftBound; left > 0; left--) positions.add(new BlockPos(cx - i, cy + j, cz - left - i));
+                        if (j > 0) {
+                            positions.add(new BlockPos(cx - i, cy + j, cz - leftBound - 1 - i));
+                            positions.add(new BlockPos(cx - i, cy + j, cz - leftBound - 2 - i));
                         }
-                        for (int lat = halfLow; lat >= 0; --lat)
-                            list.add(new BlockPos(state.getAlignStartX() - lat - i, state.getHighwayY() + h, state.getAlignStartZ() - i));
-                        if (h > 0) {
-                            list.add(new BlockPos(state.getAlignStartX() - halfLow - 1 - i, state.getHighwayY() + h, state.getAlignStartZ() - i));
-                            list.add(new BlockPos(state.getAlignStartX() - halfLow - 2 - i, state.getHighwayY() + h, state.getAlignStartZ() - i));
+                        for (int right = rightBound; right >= 0; right--) positions.add(new BlockPos(cx - right - i, cy + j, cz - i));
+                        if (j > 0) {
+                            positions.add(new BlockPos(cx - rightBound - 1 - i, cy + j, cz - i));
+                            positions.add(new BlockPos(cx - rightBound - 2 - i, cy + j, cz - i));
                         }
                     }
-                }
-                yield list.toArray(new BlockPos[0]);
+                yield positions.toArray(new BlockPos[0]);
             }
-            case SOUTH_EAST -> { // was: CsEhJrV
-                ArrayList<BlockPos> list = new ArrayList<>();
-                for (int i = -8; i <= -3; ++i) {
-                    for (int h = 0; h <= clearHeight; ++h) {
-                        for (int lat = halfHigh; lat > 0; --lat)
-                            list.add(new BlockPos(state.getAlignStartX() + i, state.getHighwayY() + h, state.getAlignStartZ() - lat - i));
-                        if (h > 0) {
-                            list.add(new BlockPos(state.getAlignStartX() + i, state.getHighwayY() + h, state.getAlignStartZ() - halfHigh - 1 - i));
-                            list.add(new BlockPos(state.getAlignStartX() + i, state.getHighwayY() + h, state.getAlignStartZ() - halfHigh - 2 - i));
+            case SOUTH_WEST -> {
+                List<BlockPos> positions = new ArrayList<>();
+                for (int i = -8; i <= -3; i++)
+                    for (int j = 0; j <= height; j++) {
+                        for (int left = leftBound; left > 0; left--) positions.add(new BlockPos(cx + i, cy + j, cz - left - i));
+                        if (j > 0) {
+                            positions.add(new BlockPos(cx + i, cy + j, cz - leftBound - 1 - i));
+                            positions.add(new BlockPos(cx + i, cy + j, cz - leftBound - 2 - i));
                         }
-                        for (int lat = halfLow; lat >= 0; --lat)
-                            list.add(new BlockPos(state.getAlignStartX() + lat + i, state.getHighwayY() + h, state.getAlignStartZ() - i));
-                        if (h > 0) {
-                            list.add(new BlockPos(state.getAlignStartX() + halfLow + 1 + i, state.getHighwayY() + h, state.getAlignStartZ() - i));
-                            list.add(new BlockPos(state.getAlignStartX() + halfLow + 2 + i, state.getHighwayY() + h, state.getAlignStartZ() - i));
+                        for (int right = rightBound; right >= 0; right--) positions.add(new BlockPos(cx + right + i, cy + j, cz - i));
+                        if (j > 0) {
+                            positions.add(new BlockPos(cx + rightBound + 1 + i, cy + j, cz - i));
+                            positions.add(new BlockPos(cx + rightBound + 2 + i, cy + j, cz - i));
                         }
                     }
-                }
-                yield list.toArray(new BlockPos[0]);
+                yield positions.toArray(new BlockPos[0]);
             }
-            default -> new BlockPos[]{};
+            default -> new BlockPos[0];
         };
+    }
+
+    /** Lazily initialises the highway centre (X/Y/Z) to the player's current position. */
+    private static void ensureCenter(HighwayState state) {
+        if (state.getCenterX() == null) state.setCenterX(MeteorClient.mc.player.getBlockX());
+        if (state.getCenterY() == null) state.setCenterY(MeteorClient.mc.player.getBlockY());
+        if (state.getCenterZ() == null) state.setCenterZ(MeteorClient.mc.player.getBlockZ());
     }
 }

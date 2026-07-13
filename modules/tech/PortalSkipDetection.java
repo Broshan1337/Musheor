@@ -1,7 +1,9 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// Class name was already readable; internal members were obfuscated.
 package musheor.modules.tech;
 
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -16,237 +18,202 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.orbit.EventHandler;
 import musheor.musheor;
 import musheor.utils.RenderUtils;
-import net.minecraft.world.chunk.ChunkPos;
-import net.minecraft.world.World;
 import net.minecraft.block.Blocks;
-import net.minecraft.util.math.BlockPos;
 import net.minecraft.block.BlockState;
-import net.minecraft.client.world.ClientWorld;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.ChunkPos;
+import net.minecraft.world.World;
 
-public class PortalSkipDetection
-extends Module {
-    private final SettingGroup sgGeneral;
-    private final Setting<Integer> chunkRadius;
-    private final CopyOnWriteArrayList<BlockPos> portalBlocks;
-    private final Set<Long> processedPortalKeys;
-    private final Set<Long> processedChunks;
-    private ExecutorService scannerExecutor;
-    private final AtomicBoolean stopFlag;
+/**
+ * "portal-skip-detection" — finds abandoned/unlit nether portal frames (a 4×5 opening of
+ * AIR that would normally be CAVE_AIR underground) around the player. A background thread
+ * scans loaded chunks in a circular radius, validating candidate frames by their bounded
+ * sides and nearby cave-air, and renders any matches.
+ */
+public class PortalSkipDetection extends Module {
+    private final SettingGroup sgGeneral = this.settings.getDefaultGroup(); // was: FvaNWO
+    private final Setting<Integer> chunkRadius = sgGeneral.add(new IntSetting.Builder() // was: Q90GLXQ0Pef
+        .name("chunk-radius").description("Radius in chunks to scan (circular)").defaultValue(4).sliderMin(1).sliderMax(8).build());
+
+    private final CopyOnWriteArrayList<BlockPos> detectedPortalBlocks = new CopyOnWriteArrayList<>(); // was: psJq59YIbp3Z
+    private final Set<Long> foundPortalKeys = ConcurrentHashMap.newKeySet();  // was: SOYyh5IPg26f7F
+    private final Set<Long> scannedChunks = ConcurrentHashMap.newKeySet();    // was: rKbT3Ifwo
+    private ExecutorService scanExecutor;                                     // was: r7hOYIKN2
+    private final AtomicBoolean stopped = new AtomicBoolean(false);           // was: oZHMlTL
 
     public PortalSkipDetection() {
         super(musheor.AUTOMATION, "portal-skip-detection", "Detects portal skip patterns (AIR in CAVE_AIR regions)");
-        this.sgGeneral = this.settings.getDefaultGroup();
-        this.chunkRadius = this.sgGeneral.add((Setting)((IntSetting.Builder)((IntSetting.Builder)((IntSetting.Builder)new IntSetting.Builder().name("chunk-radius")).description("Radius in chunks to scan (circular)")).defaultValue((Object)4)).sliderMin(1).sliderMax(8).build());
-        this.portalBlocks = new CopyOnWriteArrayList();
-        this.processedPortalKeys = ConcurrentHashMap.newKeySet();
-        this.processedChunks = ConcurrentHashMap.newKeySet();
-        this.stopFlag = new AtomicBoolean(false);
     }
 
+    @Override
     public void onActivate() {
-        this.portalBlocks.clear();
-        this.processedPortalKeys.clear();
-        this.processedChunks.clear();
-        this.stopFlag.set(false);
-        this.scannerExecutor = Executors.newSingleThreadExecutor(runnable -> {
-            Thread thread = new Thread(runnable, "PortalSkipScanner");
-            thread.setDaemon(true);
-            thread.setPriority(1);
-            return thread;
+        this.detectedPortalBlocks.clear();
+        this.foundPortalKeys.clear();
+        this.scannedChunks.clear();
+        this.stopped.set(false);
+        this.scanExecutor = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "PortalSkipScanner");
+            t.setDaemon(true);
+            t.setPriority(1);
+            return t;
         });
-        this.scannerExecutor.submit(this::runScanLoop);
-        this.info("Portal scanner started.", new Object[0]);
+        this.scanExecutor.submit(this::scanLoop);
+        this.info("Portal scanner started.");
     }
 
+    @Override
     public void onDeactivate() {
-        this.stopFlag.set(true);
-        if (this.scannerExecutor != null) {
-            this.scannerExecutor.shutdownNow();
-            this.scannerExecutor = null;
+        this.stopped.set(true);
+        if (this.scanExecutor != null) {
+            this.scanExecutor.shutdownNow();
+            this.scanExecutor = null;
         }
-        this.portalBlocks.clear();
-        this.processedPortalKeys.clear();
-        this.processedChunks.clear();
+        this.detectedPortalBlocks.clear();
+        this.foundPortalKeys.clear();
+        this.scannedChunks.clear();
     }
 
-    private void runScanLoop() {
-        while (!this.stopFlag.get()) {
+    /** Background scan loop: scans newly-loaded chunks within the circular radius. */
+    private void scanLoop() { // was: FvaNWO()
+        while (!this.stopped.get()) {
             try {
-                if (this.mc.player == null || this.mc.world == null) {
+                if (this.mc.player != null && this.mc.world != null) {
+                    World world = this.mc.world;
+                    ChunkPos center = this.mc.player.getChunkPos();
+                    int r = this.chunkRadius.get();
+                    List<ChunkPos> newChunks = new ArrayList<>();
+                    for (int dx = -r; dx <= r; dx++) {
+                        for (int dz = -r; dz <= r; dz++) {
+                            if (dx * dx + dz * dz <= r * r) {
+                                ChunkPos chunk = new ChunkPos(center.x + dx, center.z + dz);
+                                long chunkKey = chunk.toLong();
+                                if (!this.scannedChunks.contains(chunkKey) && world.isChunkLoaded(chunk.x, chunk.z)) {
+                                    newChunks.add(chunk);
+                                    this.scannedChunks.add(chunkKey);
+                                }
+                            }
+                        }
+                    }
+                    for (ChunkPos chunk : newChunks) {
+                        if (this.stopped.get()) break;
+                        this.scanChunk(world, chunk);
+                    }
+                    Thread.sleep(50L);
+                } else {
                     Thread.sleep(500L);
-                    continue;
                 }
-                ClientWorld world = this.mc.world;
-                ChunkPos ChunkPos2 = this.mc.player.getChunkPos();
-                int n = (Integer)this.chunkRadius.get();
-                ArrayList<ChunkPos> arrayList = new ArrayList<ChunkPos>();
-                for (int i = -n; i <= n; ++i) {
-                    for (int j = -n; j <= n; ++j) {
-                        ChunkPos ChunkPos3;
-                        long l;
-                        if (i * i + j * j > n * n || this.processedChunks.contains(l = (ChunkPos3 = new ChunkPos(ChunkPos2.x + i, ChunkPos2.z + j)).toLong()) || !world.isChunkLoaded(ChunkPos3.x, ChunkPos3.z)) continue;
-                        arrayList.add(ChunkPos3);
-                        this.processedChunks.add(l);
-                    }
-                }
-                if (!arrayList.isEmpty()) {
-                    for (ChunkPos ChunkPos4 : arrayList) {
-                        if (this.stopFlag.get()) break;
-                        this.scanChunk(world, ChunkPos4);
-                    }
-                }
-                Thread.sleep(50L);
-            }
-            catch (InterruptedException interruptedException) {
+            } catch (InterruptedException e) {
                 break;
-            }
-            catch (Exception exception) {
+            } catch (Exception ignored) {
             }
         }
     }
 
-    private void scanChunk(World world, ChunkPos ChunkPos2) {
-        int n = ChunkPos2.getStartX();
-        int n2 = ChunkPos2.getStartZ();
-        int n3 = world.getBottomY();
-        int n4 = world.getBottomY() + world.getHeight();
-        for (int i = n3; i < n4 && !this.stopFlag.get(); ++i) {
-            for (int j = 0; j < 16; ++j) {
-                for (int k = 0; k < 16; ++k) {
-                    BlockPos BlockPos2 = new BlockPos(n + j, i, n2 + k);
-                    this.mp3zoXQFKUKYj5(DimensionType2, BlockPos2);
+    /** Scans every block column in a chunk for candidate portal openings. */
+    private void scanChunk(World world, ChunkPos chunk) { // was: FvaNWO(World,ChunkPos)
+        int startX = chunk.getStartX();
+        int startZ = chunk.getStartZ();
+        int minY = world.getBottomY();
+        int maxY = world.getBottomY() + world.getHeight();
+        for (int y = minY; y < maxY && !this.stopped.get(); y++) {
+            for (int x = 0; x < 16; x++) {
+                for (int z = 0; z < 16; z++) {
+                    this.checkAirBlock(world, new BlockPos(startX + x, y, startZ + z));
                 }
             }
         }
     }
 
-    private void checkBlockForPortal(World world, BlockPos BlockPos2) {
+    /** If {@code pos} is AIR, tests both frame orientations anchored there. */
+    private void checkAirBlock(World world, BlockPos pos) { // was: FvaNWO(World,BlockPos)
         try {
-            if (world.getBlockState(BlockPos2).getBlock() != Blocks.LAVA) {
-                return;
-            }
-        }
-        catch (Exception exception) {
+            if (world.getBlockState(pos).getBlock() != Blocks.AIR) return;
+        } catch (Exception e) {
             return;
         }
-        this.jOdDDFXSeWl4(DimensionType2, BlockPos2, true);
-        this.jOdDDFXSeWl4(DimensionType2, BlockPos2, false);
+        this.checkPortalFrame(world, pos, true);
+        this.checkPortalFrame(world, pos, false);
     }
 
-    private void checkPortalOrientation(World world, BlockPos BlockPos2, boolean bl) {
-        int n;
-        int n2;
-        long l = BlockPos2.asLong() ^ (bl ? 1L : 0L);
-        if (this.processedPortalKeys.contains(l)) {
-            return;
-        }
-        ArrayList<BlockPos> arrayList = new ArrayList<BlockPos>();
-        boolean bl2 = true;
+    /** Validates a 4×5 AIR opening (allowing empty corners) anchored at {@code corner}. */
+    private void checkPortalFrame(World world, BlockPos corner, boolean xAligned) { // was: FvaNWO(World,BlockPos,boolean)
+        long key = corner.asLong() ^ (xAligned ? 1L : 0L);
+        if (this.foundPortalKeys.contains(key)) return;
+        List<BlockPos> portalBlocks = new ArrayList<>();
+        boolean valid = true;
         try {
-            for (n2 = 0; n2 < 5 && bl2; ++n2) {
-                for (n = 0; n < 4 && bl2; ++n) {
-                    boolean bl3;
-                    BlockPos BlockPos3 = bl ? BlockPos2.add(n, n2, 0) : BlockPos2.add(0, n2, n);
-                    BlockState BlockState2 = world.getBlockState(BlockPos3);
-                    boolean bl4 = BlockState2.getBlock() == Blocks.LAVA;
-                    boolean bl5 = bl3 = !(n2 != 0 && n2 != 4 || n != 0 && n != 3);
-                    if (bl4) {
-                        arrayList.add(BlockPos3);
-                        continue;
-                    }
-                    if (bl3) continue;
-                    bl2 = false;
+            for (int h = 0; h < 5 && valid; h++) {
+                for (int w = 0; w < 4 && valid; w++) {
+                    BlockPos checkPos = xAligned ? corner.add(w, h, 0) : corner.add(0, h, w);
+                    BlockState state = world.getBlockState(checkPos);
+                    boolean isAir = state.getBlock() == Blocks.AIR;
+                    boolean isCorner = (h == 0 || h == 4) && (w == 0 || w == 3);
+                    if (isAir) portalBlocks.add(checkPos);
+                    else if (!isCorner) valid = false;
                 }
             }
-        }
-        catch (Exception exception) {
+        } catch (Exception e) {
             return;
         }
-        if (bl2 && arrayList.size() >= 14 && this.mp3zoXQFKUKYj5(DimensionType2, BlockPos2, bl)) {
-            this.processedPortalKeys.add(l);
-            this.portalBlocks.addAll(arrayList);
-            n2 = BlockPos2.getX();
-            n = BlockPos2.getY();
-            int n3 = BlockPos2.getZ();
-            this.mc.execute(() -> this.info("Portal found at %d, %d, %d!", new Object[]{n2, n, n3}));
+
+        if (valid && portalBlocks.size() >= 14 && this.isPortalSkipContext(world, corner, xAligned)) {
+            this.foundPortalKeys.add(key);
+            this.detectedPortalBlocks.addAll(portalBlocks);
+            int x = corner.getX();
+            int y = corner.getY();
+            int z = corner.getZ();
+            this.mc.execute(() -> this.info("Portal found at %d, %d, %d!", x, y, z));
         }
     }
 
-    private boolean verifyPortalFrame(World world, BlockPos BlockPos2, boolean bl) {
+    /** True if the frame is sufficiently bounded and surrounded by cave-air (a portal-skip signature). */
+    private boolean isPortalSkipContext(World world, BlockPos corner, boolean xAligned) { // was: Q90GLXQ0Pef(World,BlockPos,boolean)
         try {
-            int n;
-            int n2;
-            int n3;
-            int n4 = 0;
-            int n5 = 0;
-            boolean bl2 = true;
-            for (n3 = 0; n3 < 5; ++n3) {
-                BlockPos BlockPos3;
-                BlockPos BlockPos4 = BlockPos3 = bl ? BlockPos2.add(-1, n3, 0) : BlockPos2.add(0, n3, -1);
-                if (world.getBlockState(BlockPos3).getBlock() == Blocks.LAVA) {
-                    bl2 = false;
-                }
-                if (world.getBlockState(BlockPos3).getBlock() != Blocks.OBSIDIAN) continue;
-                ++n4;
+            int caveAirNearby = 0;
+            int boundedSides = 0;
+
+            boolean leftBounded = true;
+            for (int h = 0; h < 5; h++) {
+                BlockPos pos = xAligned ? corner.add(-1, h, 0) : corner.add(0, h, -1);
+                if (world.getBlockState(pos).getBlock() == Blocks.AIR) leftBounded = false;
+                if (world.getBlockState(pos).getBlock() == Blocks.CAVE_AIR) caveAirNearby++;
             }
-            if (bl2) {
-                ++n5;
+            if (leftBounded) boundedSides++;
+
+            boolean rightBounded = true;
+            for (int h = 0; h < 5; h++) {
+                BlockPos pos = xAligned ? corner.add(4, h, 0) : corner.add(0, h, 4);
+                if (world.getBlockState(pos).getBlock() == Blocks.AIR) rightBounded = false;
+                if (world.getBlockState(pos).getBlock() == Blocks.CAVE_AIR) caveAirNearby++;
             }
-            n3 = 1;
-            for (n2 = 0; n2 < 5; ++n2) {
-                BlockPos BlockPos5;
-                BlockPos BlockPos6 = BlockPos5 = bl ? BlockPos2.add(4, n2, 0) : BlockPos2.add(0, n2, 4);
-                if (world.getBlockState(BlockPos5).getBlock() == Blocks.LAVA) {
-                    n3 = 0;
-                }
-                if (world.getBlockState(BlockPos5).getBlock() != Blocks.OBSIDIAN) continue;
-                ++n4;
+            if (rightBounded) boundedSides++;
+
+            boolean bottomBounded = true;
+            for (int w = 0; w < 4; w++) {
+                BlockPos pos = xAligned ? corner.add(w, -1, 0) : corner.add(0, -1, w);
+                if (world.getBlockState(pos).getBlock() == Blocks.AIR) bottomBounded = false;
+                if (world.getBlockState(pos).getBlock() == Blocks.CAVE_AIR) caveAirNearby++;
             }
-            if (n3 != 0) {
-                ++n5;
+            if (bottomBounded) boundedSides++;
+
+            boolean topBounded = true;
+            for (int w = 0; w < 4; w++) {
+                BlockPos pos = xAligned ? corner.add(w, 5, 0) : corner.add(0, 5, w);
+                if (world.getBlockState(pos).getBlock() == Blocks.AIR) topBounded = false;
+                if (world.getBlockState(pos).getBlock() == Blocks.CAVE_AIR) caveAirNearby++;
             }
-            n2 = 1;
-            for (n = 0; n < 4; ++n) {
-                BlockPos BlockPos7;
-                BlockPos BlockPos8 = BlockPos7 = bl ? BlockPos2.add(n, -1, 0) : BlockPos2.add(0, -1, n);
-                if (world.getBlockState(BlockPos7).getBlock() == Blocks.LAVA) {
-                    n2 = 0;
-                }
-                if (world.getBlockState(BlockPos7).getBlock() != Blocks.OBSIDIAN) continue;
-                ++n4;
-            }
-            if (n2 != 0) {
-                ++n5;
-            }
-            n = 1;
-            for (int i = 0; i < 4; ++i) {
-                BlockPos BlockPos9;
-                BlockPos BlockPos10 = BlockPos9 = bl ? BlockPos2.add(i, 5, 0) : BlockPos2.add(0, 5, i);
-                if (world.getBlockState(BlockPos9).getBlock() == Blocks.LAVA) {
-                    n = 0;
-                }
-                if (world.getBlockState(BlockPos9).getBlock() != Blocks.OBSIDIAN) continue;
-                ++n4;
-            }
-            if (n != 0) {
-                ++n5;
-            }
-            return n5 >= 2 && n4 >= 10;
-        }
-        catch (Exception exception) {
+            if (topBounded) boundedSides++;
+
+            return boundedSides >= 2 && caveAirNearby >= 10;
+        } catch (Exception e) {
             return false;
         }
     }
 
     @EventHandler
-    private void onRender(Render3DEvent render3DEvent) {
-        if (this.mc.player == null || this.mc.world == null) {
-            return;
+    private void onRender(Render3DEvent event) { // was: FvaNWO(Render3DEvent)
+        if (this.mc.player != null && this.mc.world != null && !this.detectedPortalBlocks.isEmpty()) {
+            RenderUtils.render(event, new ArrayList<>(this.detectedPortalBlocks));
         }
-        if (this.portalBlocks.isEmpty()) {
-            return;
-        }
-        RenderUtils.mp3zoXQFKUKYj5(render3DEvent, new ArrayList<BlockPos>(this.portalBlocks));
     }
 }
-

@@ -1,29 +1,33 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// Class name was already readable; internal members were obfuscated.
 package musheor.modules.automation.highway;
 
-import java.lang.invoke.MethodHandle;
-import java.lang.runtime.ObjectMethods;
 import musheor.compat.VersionHelper;
-import musheor.modules.automation.highway.HighwayNetwork;
-import musheor.modules.automation.highway.HighwayRouter;
-import musheor.utils.WorldUtils;
+import musheor.utils.WorldUtils.Coord2D;
 import musheor.utils.internal.PathingHelper;
-import net.minecraft.BlockPos;
-import net.minecraft.MinecraftClient;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.util.math.BlockPos;
 
+/**
+ * Drives the player along a {@link HighwayRouter.Route} as a state machine: align yaw
+ * toward the next waypoint, bounce (elytra) toward it, approach, hand off to Baritone to
+ * settle onto the highway at the transition, then advance to the next leg. Reports state
+ * changes and completion through a {@link Listener}; toggles bouncing through a
+ * {@link BounceController}.
+ */
 public class HighwayNavigator {
-    private final MinecraftClient mc = MinecraftClient.getInstance();
-    private final HighwayRouter.Route route;
-    private final BounceController bounceController;
-    private final Listener listener;
-    private final Config config;
-    private State state = State.Aligning;
-    private int legIndex = 0;
-    private int alignTicks = 0;
-    private int stuckTicks = 0;
-    private int settleTicksRemaining = 0;
-    private WorldUtils.Vec2d lastPos2d = null;
-    private double approachDistance = Double.MAX_VALUE;
+    private final MinecraftClient mc = MinecraftClient.getInstance(); // was: FvaNWO
+    private final HighwayRouter.Route route;         // was: Q90GLXQ0Pef
+    private final BounceController bounceController;  // was: psJq59YIbp3Z
+    private final Listener listener;                 // was: SOYyh5IPg26f7F
+    private final Config config;                     // was: rKbT3Ifwo
+    private State state = State.ALIGNING;            // was: r7hOYIKN2
+    private int legIndex = 0;                        // was: oZHMlTL
+    private int alignTicks = 0;                      // was: xQr5FhbwpQPWgIQ
+    private int stuckTicks = 0;                      // was: OMMZL1F3q
+    private int settleCountdown = 0;                 // was: zu3a44xDeMFMCRwm
+    private Coord2D lastPos = null;                  // was: krxNb5lcQuWA
+    private double closestApproach = Double.MAX_VALUE; // was: nt0HZnvBBp
 
     public HighwayNavigator(HighwayRouter.Route route, Config config, BounceController bounceController, Listener listener) {
         this.route = route;
@@ -32,276 +36,189 @@ public class HighwayNavigator {
         this.listener = listener;
     }
 
-    public State getState() {
+    public State getState() { // was: FvaNWO()
         return this.state;
     }
 
-    public void tick() {
-        if (this.mc.player == null || this.mc.world == null) {
-            return;
-        }
-        if (this.state == State.Done || this.state == State.Stopped) {
-            return;
-        }
+    /** Advances the state machine by one tick. */
+    public void tick() { // was: Q90GLXQ0Pef()
+        if (this.mc.player == null || this.mc.world == null) return;
+        if (this.state == State.DONE || this.state == State.FAILED) return;
         if (this.route.legs.isEmpty()) {
-            this.completeRoute();
+            this.finish();
             return;
         }
-        switch (this.state.ordinal()) {
-            case 0: {
-                this.tickAligning();
-                break;
-            }
-            case 1: {
-                this.tickBouncing();
-                break;
-            }
-            case 2: {
-                this.tickApproaching();
-                break;
-            }
-            case 3: {
-                this.tickTransitioning();
-                break;
-            }
-            case 4: {
-                this.tickSettling();
-            }
+        switch (this.state) {
+            case ALIGNING -> this.tickAligning();
+            case BOUNCING -> this.tickBouncing();
+            case APPROACHING -> this.tickApproaching();
+            case TRANSITIONING -> this.tickTransitioning();
+            case SETTLING -> this.tickSettling();
         }
     }
 
-    public void stop() {
-        this.disableBouncing();
-        if (PathingHelper.isAlreadyPathing()) {
-            PathingHelper.stopPathing();
-        }
+    /** Stops navigation: halts bouncing and cancels any active pathing. */
+    public void stop() { // was: psJq59YIbp3Z()
+        this.stopBouncing();
+        if (PathingHelper.isPathing()) PathingHelper.cancelEverything();
     }
 
-    private void tickAligning() {
-        WorldUtils.Vec2d vec2d = this.getNextWaypoint();
-        float f = this.getYawToward(vec2d);
-        this.mc.player.setYaw(f);
-        float f2 = Math.abs(this.normalizeAngleDiff(this.mc.player.getYaw(), f));
-        ++this.alignTicks;
-        if (f2 <= this.config.yawToleranceDeg() || this.alignTicks >= this.config.alignTimeoutTicks()) {
+    private void tickAligning() { // was: SOYyh5IPg26f7F()
+        Coord2D target = this.nextWaypoint();
+        float desiredYaw = this.yawTo(target);
+        this.mc.player.setYaw(desiredYaw);
+        float yawDiff = Math.abs(this.yawDifference(this.mc.player.getYaw(), desiredYaw));
+        this.alignTicks++;
+        if (yawDiff <= this.config.yawToleranceDeg() || this.alignTicks >= this.config.alignTimeoutTicks()) {
             this.alignTicks = 0;
-            this.approachDistance = this.distanceToWaypoint(this.getNextWaypoint());
-            this.enableBouncing();
-            this.setState(State.Bouncing, "bouncing toward " + this.getNextWaypointStr());
+            this.closestApproach = this.distanceTo(this.nextWaypoint());
+            this.startBouncing();
+            this.transition(State.BOUNCING, "bouncing toward " + this.formatTarget());
         }
     }
 
-    private void tickBouncing() {
-        WorldUtils.Vec2d vec2d = this.getNextWaypoint();
-        double d = this.distanceToWaypoint(vec2d);
-        if (!PathingHelper.isAlreadyPathing()) {
-            this.mc.player.setYaw(this.getYawToward(vec2d));
+    private void tickBouncing() { // was: rKbT3Ifwo()
+        Coord2D target = this.nextWaypoint();
+        double dist = this.distanceTo(target);
+        if (!PathingHelper.isPathing()) {
+            this.mc.player.setYaw(this.yawTo(target));
         }
-        this.updateStuckDetection();
-        if (d < this.config.approachRadius() && d < this.approachDistance) {
-            this.setState(State.Approaching, "approaching " + this.getNextWaypointStr());
-        }
-    }
-
-    private void tickApproaching() {
-        WorldUtils.Vec2d vec2d = this.getNextWaypoint();
-        double d = this.distanceToWaypoint(vec2d);
-        this.mc.player.setYaw(this.getYawToward(vec2d));
-        if (d < this.config.arriveRadius()) {
-            this.disableBouncing();
-            BlockPos BlockPos2 = this.toBlockPos(vec2d);
-            PathingHelper.setGoal(BlockPos2);
-            this.setState(State.Transitioning, "transitioning at " + this.getNextWaypointStr());
+        this.updateClosestApproach();
+        if (dist < this.config.approachRadius() && dist < this.closestApproach) {
+            this.transition(State.APPROACHING, "approaching " + this.formatTarget());
         }
     }
 
-    private void tickTransitioning() {
-        if (!PathingHelper.isAlreadyPathing()) {
-            this.settleTicksRemaining = this.config.settleTicks();
-            this.setState(State.Settling, "settling at " + this.getNextWaypointStr());
+    private void tickApproaching() { // was: r7hOYIKN2()
+        Coord2D target = this.nextWaypoint();
+        double dist = this.distanceTo(target);
+        this.mc.player.setYaw(this.yawTo(target));
+        if (dist < this.config.arriveRadius()) {
+            this.stopBouncing();
+            BlockPos goal = this.toBlockPos(target);
+            PathingHelper.gotoBlock(goal);
+            this.transition(State.TRANSITIONING, "transitioning at " + this.formatTarget());
         }
     }
 
-    private void tickSettling() {
-        int n = this.legIndex + 2;
-        WorldUtils.Vec2d vec2d = n < this.route.waypoints.size() ? this.route.waypoints.get(n) : this.getNextWaypoint();
-        this.mc.player.setYaw(this.getYawToward(vec2d));
-        if (--this.settleTicksRemaining <= 0) {
+    private void tickTransitioning() { // was: oZHMlTL()
+        if (!PathingHelper.isPathing()) {
+            this.settleCountdown = this.config.settleTicks();
+            this.transition(State.SETTLING, "settling at " + this.formatTarget());
+        }
+    }
+
+    private void tickSettling() { // was: xQr5FhbwpQPWgIQ()
+        int nextWpIdx = this.legIndex + 2;
+        Coord2D faceTarget = nextWpIdx < this.route.waypoints.size() ? this.route.waypoints.get(nextWpIdx) : this.nextWaypoint();
+        this.mc.player.setYaw(this.yawTo(faceTarget));
+        if (--this.settleCountdown <= 0) {
             this.advanceLeg();
         }
     }
 
-    private void advanceLeg() {
-        ++this.legIndex;
+    private void advanceLeg() { // was: OMMZL1F3q()
+        this.legIndex++;
         if (this.legIndex >= this.route.legs.size()) {
-            this.completeRoute();
-            return;
+            this.finish();
+        } else {
+            this.startBouncing();
+            this.transition(State.ALIGNING, "aligning for leg " + this.legIndex + ": " + this.currentLeg().highway().name());
         }
-        this.enableBouncing();
-        this.setState(State.Aligning, "aligning for leg " + this.legIndex + ": " + this.getCurrentLeg().highway().name());
     }
 
-    private void enableBouncing() {
+    private void startBouncing() { // was: zu3a44xDeMFMCRwm()
         this.bounceController.setBouncing(true);
     }
 
-    private void disableBouncing() {
+    private void stopBouncing() { // was: krxNb5lcQuWA()
         this.bounceController.setBouncing(false);
     }
 
-    private void updateStuckDetection() {
-        WorldUtils.Vec2d vec2d = this.getPlayerPos2d();
-        if (this.lastPos2d != null) {
-            double d = HighwayNetwork.distance(vec2d, this.lastPos2d);
-            this.stuckTicks = d < 0.5 ? ++this.stuckTicks : 0;
+    /** Tracks the number of ticks the player has been effectively stationary. */
+    private void updateClosestApproach() { // was: nt0HZnvBBp()
+        Coord2D pos = this.playerPos();
+        if (this.lastPos != null) {
+            double moved = HighwayNetwork.distance(pos, this.lastPos);
+            if (moved < 0.5) {
+                this.stuckTicks++;
+            } else {
+                this.stuckTicks = 0;
+            }
         }
-        this.lastPos2d = vec2d;
+        this.lastPos = pos;
     }
 
-    private HighwayRouter.Leg getCurrentLeg() {
+    private HighwayRouter.Leg currentLeg() { // was: amz3UB1vE()
         return this.route.legs.get(this.legIndex);
     }
 
-    private WorldUtils.Vec2d getNextWaypoint() {
+    private Coord2D nextWaypoint() { // was: sBBIyQG5NWq0K()
         return this.route.waypoints.get(this.legIndex + 1);
     }
 
-    private String getNextWaypointStr() {
-        WorldUtils.Vec2d vec2d = this.getNextWaypoint();
-        return String.format("(%.0f, %.0f)", vec2d.x(), vec2d.z());
+    private String formatTarget() { // was: sZkZ1izAy()
+        Coord2D wp = this.nextWaypoint();
+        return String.format("(%.0f, %.0f)", wp.x(), wp.z());
     }
 
-    private double distanceToWaypoint(WorldUtils.Vec2d vec2d) {
-        WorldUtils.Vec2d vec2d2 = this.getPlayerPos2d();
-        return HighwayNetwork.distance(vec2d2, vec2d);
+    private double distanceTo(Coord2D target) { // was: FvaNWO(Coord2D)
+        return HighwayNetwork.distance(this.playerPos(), target);
     }
 
-    private WorldUtils.Vec2d getPlayerPos2d() {
-        return new WorldUtils.Vec2d(this.mc.player.getX(), this.mc.player.getZ());
+    private Coord2D playerPos() { // was: QYKUhjp()
+        return new Coord2D(this.mc.player.getX(), this.mc.player.getZ());
     }
 
-    private BlockPos toBlockPos(WorldUtils.Vec2d vec2d) {
-        return new BlockPos((int)vec2d.x(), (int)VersionHelper.get().getPlayerPos().getY(), (int)vec2d.z());
+    private BlockPos toBlockPos(Coord2D p) { // was: Q90GLXQ0Pef(Coord2D)
+        return new BlockPos((int) p.x(), (int) VersionHelper.get().getPlayerPos().getY(), (int) p.z());
     }
 
-    private float getYawToward(WorldUtils.Vec2d vec2d) {
-        double d = vec2d.x() - this.mc.player.getX();
-        double d2 = vec2d.z() - this.mc.player.getZ();
-        return (float)Math.toDegrees(Math.atan2(-d, d2));
+    /** Yaw (degrees) pointing from the player toward {@code target}. */
+    private float yawTo(Coord2D target) { // was: psJq59YIbp3Z(Coord2D)
+        double dx = target.x() - this.mc.player.getX();
+        double dz = target.z() - this.mc.player.getZ();
+        return (float) Math.toDegrees(Math.atan2(-dx, dz));
     }
 
-    private float normalizeAngleDiff(float f, float f2) {
-        float f3 = (f - f2) % 360.0f;
-        if (f3 > 180.0f) {
-            f3 -= 360.0f;
-        }
-        if (f3 < -180.0f) {
-            f3 += 360.0f;
-        }
-        return f3;
+    /** Signed shortest angular difference between two yaws, in [-180, 180]. */
+    private float yawDifference(float a, float b) { // was: FvaNWO(float,float)
+        float diff = (a - b) % 360.0F;
+        if (diff > 180.0F) diff -= 360.0F;
+        if (diff < -180.0F) diff += 360.0F;
+        return diff;
     }
 
-    private void setState(State state, String string) {
-        this.state = state;
-        this.listener.onStateChange(state, string);
+    private void transition(State newState, String description) { // was: FvaNWO(State,String)
+        this.state = newState;
+        this.listener.onStateChange(newState, description);
     }
 
-    private void completeRoute() {
-        this.disableBouncing();
-        this.state = State.Done;
-        this.listener.onWaypointReached();
+    private void finish() { // was: NIz4xic3Js9()
+        this.stopBouncing();
+        this.state = State.DONE;
+        this.listener.onComplete();
     }
 
-    public static final class State
-    extends Enum<State> {
-        public static final /* enum */ State Aligning = new State();
-        public static final /* enum */ State Bouncing = new State();
-        public static final /* enum */ State Approaching = new State();
-        public static final /* enum */ State Transitioning = new State();
-        public static final /* enum */ State Settling = new State();
-        public static final /* enum */ State Done = new State();
-        public static final /* enum */ State Stopped = new State();
-        private static final /* synthetic */ State[] $VALUES;
-
-        public static State[] values() {
-            return (State[])$VALUES.clone();
-        }
-
-        public static State valueOf(String string) {
-            return Enum.valueOf(State.class, string);
-        }
-
-        private static /* synthetic */ State[] $init() {
-            return new State[]{Aligning, Bouncing, Approaching, Transitioning, Settling, Done, Stopped};
-        }
-
-        static {
-            $VALUES = State.$init();
-        }
+    /** Toggles the elytra bounce that propels the player between waypoints. */
+    public interface BounceController {
+        void setBouncing(boolean bouncing); // was: FvaNWO(boolean)
     }
 
-    public static final class Config
-    extends Record {
-        private final double approachRadius;
-        private final double arriveRadius;
-        private final int alignTimeoutTicks;
-        private final float yawToleranceDeg;
-        private final int transitionGoalDist;
-        private final int settleTicks;
-
-        public Config(double d, double d2, int n, float f, int n2, int n3) {
-            this.approachRadius = d;
-            this.arriveRadius = d2;
-            this.alignTimeoutTicks = n;
-            this.yawToleranceDeg = f;
-            this.transitionGoalDist = n2;
-            this.settleTicks = n3;
-        }
-
-        @Override
-        public final String toString() {
-            return ObjectMethods.bootstrap("toString", new MethodHandle[]{Config.class, "approachRadius;arriveRadius;alignTimeoutTicks;yawToleranceDeg;transitionGoalDist;settleTicks", "approachRadius", "arriveRadius", "alignTimeoutTicks", "yawToleranceDeg", "transitionGoalDist", "settleTicks"}, this);
-        }
-
-        @Override
-        public final int hashCode() {
-            return (int)ObjectMethods.bootstrap("hashCode", new MethodHandle[]{Config.class, "approachRadius;arriveRadius;alignTimeoutTicks;yawToleranceDeg;transitionGoalDist;settleTicks", "approachRadius", "arriveRadius", "alignTimeoutTicks", "yawToleranceDeg", "transitionGoalDist", "settleTicks"}, this);
-        }
-
-        @Override
-        public final boolean equals(Object object) {
-            return (boolean)ObjectMethods.bootstrap("equals", new MethodHandle[]{Config.class, "approachRadius;arriveRadius;alignTimeoutTicks;yawToleranceDeg;transitionGoalDist;settleTicks", "approachRadius", "arriveRadius", "alignTimeoutTicks", "yawToleranceDeg", "transitionGoalDist", "settleTicks"}, this, object);
-        }
-
-        public double approachRadius() {
-            return this.approachRadius;
-        }
-
-        public double arriveRadius() {
-            return this.arriveRadius;
-        }
-
-        public int alignTimeoutTicks() {
-            return this.alignTimeoutTicks;
-        }
-
-        public float yawToleranceDeg() {
-            return this.yawToleranceDeg;
-        }
-
-        public int settleTicks() {
-            return this.settleTicks;
-        }
+    /**
+     * Navigation tuning. {@code transitionGoalDist} is retained from the original but unused
+     * by the navigator's current logic.
+     */
+    public record Config(double approachRadius, double arriveRadius, int alignTimeoutTicks,
+                         float yawToleranceDeg, int transitionGoalDist, int settleTicks) {
     }
 
-    public static interface BounceController {
-        public void setBouncing(boolean var1);
+    /** Receives navigator state transitions and completion. */
+    public interface Listener {
+        void onStateChange(State state, String description); // was: FvaNWO(State,String)
+        void onComplete();                                   // was: FvaNWO()
     }
 
-    public static interface Listener {
-        public void onStateChange(State var1, String var2);
-
-        public void onWaypointReached();
-    }
+    /** Navigator states. */ // was: enum State {FvaNWO, Q90GLXQ0Pef, psJq59YIbp3Z, SOYyh5IPg26f7F, rKbT3Ifwo, r7hOYIKN2, oZHMlTL}
+    public enum State { ALIGNING, BOUNCING, APPROACHING, TRANSITIONING, SETTLING, DONE, FAILED }
 }
-

@@ -1,4 +1,5 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// (source class was obfuscated as obf.XfFrUB)
 package musheor.utils;
 
 import meteordevelopment.discordipc.DiscordIPC;
@@ -7,56 +8,45 @@ import musheor.utils.internal.HighwayState;
 import musheor.utils.system.MusheorSystem;
 
 /**
- * Manages Discord Rich Presence showing highway building stats.
- * Connects to Discord via local IPC (not network). Reads-only local highway state.
+ * Discord Rich Presence integration (LOCAL Discord IPC socket only — no network
+ * egress). Shows live/lifetime obsidian-placed/mined counts while building.
  */
 public class DiscordRPC {
-    // Discord Application ID for the Musheor app
-    private static final long APP_ID = 1346947991059300434L;
-    private static final RichPresence presence = new RichPresence();
+    private static final long APP_ID = 1346947991059300434L;              // was: FvaNWO (field)
+    private static final RichPresence PRESENCE = new RichPresence();      // was: Q90GLXQ0Pef (field)
 
-    /** Start Discord RPC and show initial activity. */
-    public static void start() {
+    /** Connects to Discord and initialises the presence. */
+    public static void start() { // was: FvaNWO()
         DiscordIPC.start(APP_ID, null);
-        presence.setStart(System.currentTimeMillis() / 1000L);
-        presence.setLargeImage(
-            "https://cdn.discordapp.com/app-icons/1346947991059300434/488ce08bbd35ade7c2d6ae1e552ec8e2.png?size=512",
-            "Musheor Highway Builder"
-        );
-        updateActivity();
+        PRESENCE.setStart(System.currentTimeMillis() / 1000L);
+        PRESENCE.setLargeImage("musheor_logo", "Musheor Highway Builder");
+        update();
     }
 
-    /** Stop Discord RPC. */
-    public static void stop() {
+    /** Disconnects from Discord. */
+    public static void stop() { // was: Q90GLXQ0Pef()
         DiscordIPC.stop();
     }
 
-    /** Push updated highway stats to Discord Rich Presence. Only updates after 20 ticks. */
-    public static void updateActivity() {
-        if (HighwayState.getInstance().getTicksActive() <= 20) {
-            return;
+    /** Pushes current stats to Discord (only once the session has run >20 ticks). */
+    public static void update() { // was: psJq59YIbp3Z()
+        if (HighwayState.getInstance().getTicksActive() > 20) {
+            PRESENCE.setDetails(buildDetails());
+            PRESENCE.setState(buildState());
+            DiscordIPC.setActivity(PRESENCE);
+            MusheorSystem.debug("Updated RPC.");
         }
-        presence.setDetails(getDetailsString());
-        presence.setState(getStateString());
-        DiscordIPC.setActivity(presence);
-        MusheorSystem.debug("Updated RPC.");
     }
 
-    /** Returns the RPC details line: current session obsidian placed/mined. */
-    private static String getDetailsString() {
-        return String.format(
-            "Obsidian placed | mined: %s | %s",
-            HighwayState.getInstance().getSessionObsidianPlaced(),
-            HighwayState.getInstance().getSessionObsidianMined()
-        );
+    private static String buildDetails() { // was: SOYyh5IPg26f7F()
+        return String.format("Obsidian placed | mined: %s | %s",
+            StatsHandler.abbreviate(HighwayState.getInstance().getSessionObsidianPlaced()),
+            StatsHandler.abbreviate(HighwayState.getInstance().getSessionObsidianMined()));
     }
 
-    /** Returns the RPC state line: lifetime obsidian placed/mined. */
-    private static String getStateString() {
-        return String.format(
-            "Lifetime: %s placed | %s mined",
-            HighwayState.getInstance().getLifetimeObsidianPlaced(),
-            HighwayState.getInstance().getLifetimeObsidianMined()
-        );
+    private static String buildState() { // was: rKbT3Ifwo()
+        return String.format("Lifetime: %s placed | %s mined",
+            StatsHandler.abbreviate(HighwayState.getInstance().getLifetimeObsidianPlaced()),
+            StatsHandler.abbreviate(HighwayState.getInstance().getLifetimeObsidianMined()));
     }
 }

@@ -1,4 +1,5 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// Class name was already readable; internal members were obfuscated.
 package musheor.modules.automation;
 
 import meteordevelopment.meteorclient.events.world.TickEvent;
@@ -11,162 +12,191 @@ import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.utils.Utils;
 import meteordevelopment.meteorclient.utils.player.InvUtils;
 import meteordevelopment.orbit.EventHandler;
-import musheor.compat.VersionHelper;
-import musheor.modules.automation.HighwayBuilder;
 import musheor.musheor;
+import musheor.compat.VersionHelper;
 import musheor.utils.PlayerUtils;
-import musheor.utils.WorldUtils;
 import musheor.utils.system.MusheorSystem;
-import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.enchantment.Enchantments;
+import net.minecraft.inventory.Inventory;
+import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
-import net.minecraft.enchantment.Enchantments;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.registry.RegistryKey;
 
-public class HotbarReplenish
-extends Module {
-    private final SettingGroup sgGeneral;
-    private static final MinecraftClient mc = MinecraftClient.getInstance();
-    private final Setting<Integer> threshold;
-    private final Setting<Boolean> highwayMode;
-    private final Setting<ItemStack> offhandSlot;
-    private final Setting<ItemStack> slot1Item;
-    private final Setting<ItemStack> slot2Item;
-    private final Setting<ItemStack> slot3Item;
-    private final Setting<ItemStack> slot4Item;
-    private final Setting<ItemStack> slot5Item;
-    private final Setting<ItemStack> slot6Item;
-    private final Setting<ItemStack> slot7Item;
-    private final Setting<ItemStack> slot8Item;
-    private final Setting<ItemStack> slot9Item;
+/**
+ * "hotbar-replenish" — keeps each hotbar (and offhand) slot topped up with a configured
+ * item, pulling replacements from the main inventory when a slot empties or drops below a
+ * threshold. In "highway-mode" it instead keeps a usable (non-silk-touch, durable) pickaxe
+ * in the first slot, matching HighwayBuilder's PAVE/DIG behaviour.
+ */
+public class HotbarReplenish extends Module {
+    private final SettingGroup sgGeneral = this.settings.getDefaultGroup(); // was: Q90GLXQ0Pef
+    private static final MinecraftClient mc = MinecraftClient.getInstance(); // was: psJq59YIbp3Z
+
+    private final Setting<Integer> threshold = sgGeneral.add(new IntSetting.Builder() // was: SOYyh5IPg26f7F
+        .name("threshold").description("The threshold of items left to trigger replenishment.").defaultValue(16).min(1).sliderRange(1, 63).build());
+    private final Setting<Boolean> highwayMode = sgGeneral.add(new BoolSetting.Builder() // was: rKbT3Ifwo
+        .name("highway-mode").description("Enable this if you are using Better-Highway-Builder").defaultValue(false).build());
+    private final Setting<Item> offhandItem = sgGeneral.add(new ItemSetting.Builder() // was: r7hOYIKN2
+        .name("offhand-item").description("Item to maintain offhand slot..").defaultValue(Items.AIR).visible(() -> !highwayMode.get()).build());
+    private final Setting<Item> slot1Item = sgGeneral.add(new ItemSetting.Builder() // was: oZHMlTL
+        .name("slot-1-item").description("Item to maintain in the first hotbar slot.").defaultValue(Items.AIR).visible(() -> !highwayMode.get()).build());
+    private final Setting<Item> slot2Item = sgGeneral.add(new ItemSetting.Builder() // was: xQr5FhbwpQPWgIQ
+        .name("slot-2-item").description("Item to maintain in the second hotbar slot.").defaultValue(Items.AIR).build());
+    private final Setting<Item> slot3Item = sgGeneral.add(new ItemSetting.Builder() // was: OMMZL1F3q
+        .name("slot-3-item").description("Item to maintain in the third hotbar slot.").defaultValue(Items.AIR).build());
+    private final Setting<Item> slot4Item = sgGeneral.add(new ItemSetting.Builder() // was: zu3a44xDeMFMCRwm
+        .name("slot-4-item").description("Item to maintain in the fourth hotbar slot.").defaultValue(Items.AIR).build());
+    private final Setting<Item> slot5Item = sgGeneral.add(new ItemSetting.Builder() // was: krxNb5lcQuWA
+        .name("slot-5-item").description("Item to maintain in the fifth hotbar slot.").defaultValue(Items.AIR).build());
+    private final Setting<Item> slot6Item = sgGeneral.add(new ItemSetting.Builder() // was: nt0HZnvBBp
+        .name("slot-6-item").description("Item to maintain in the sixth hotbar slot.").defaultValue(Items.AIR).build());
+    private final Setting<Item> slot7Item = sgGeneral.add(new ItemSetting.Builder() // was: amz3UB1vE
+        .name("slot-7-item").description("Item to maintain in the seventh hotbar slot.").defaultValue(Items.AIR).build());
+    private final Setting<Item> slot8Item = sgGeneral.add(new ItemSetting.Builder() // was: sBBIyQG5NWq0K
+        .name("slot-8-item").description("Item to maintain in the eighth hotbar slot.").defaultValue(Items.AIR).build());
+    private final Setting<Item> slot9Item = sgGeneral.add(new ItemSetting.Builder() // was: sZkZ1izAy
+        .name("slot-9-item").description("Item to maintain in the ninth hotbar slot.").defaultValue(Items.AIR).visible(() -> !highwayMode.get()).build());
 
     public HotbarReplenish() {
         super(musheor.AUTOMATION, "hotbar-replenish", "Automatically refills specific items in each hotbar slot. Each slot independantly configurable.");
-        this.sgGeneral = this.settings.getDefaultGroup();
-        this.threshold = this.sgGeneral.add((Setting)((IntSetting.Builder)((IntSetting.Builder)((IntSetting.Builder)new IntSetting.Builder().name("threshold")).description("The threshold of items left to trigger replenishment.")).defaultValue((Object)16)).min(1).sliderRange(1, 63).build());
-        this.highwayMode = this.sgGeneral.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("highway-mode")).description("Enable this if you are using Better-Highway-Builder")).defaultValue((Object)false)).build());
-        this.offhandSlot = this.sgGeneral.add((Setting)((ItemSetting.Builder)((ItemSetting.Builder)((ItemSetting.Builder)((ItemSetting.Builder)new ItemSetting.Builder().name("offhand-item")).description("Item to maintain offhand slot..")).defaultValue((Object)Items.AIR)).visible(() -> (Boolean)this.highwayMode.get() == false)).build());
-        this.slot1Item = this.sgGeneral.add((Setting)((ItemSetting.Builder)((ItemSetting.Builder)((ItemSetting.Builder)((ItemSetting.Builder)new ItemSetting.Builder().name("slot-1-item")).description("Item to maintain in the first hotbar slot.")).defaultValue((Object)Items.AIR)).visible(() -> (Boolean)this.highwayMode.get() == false)).build());
-        this.slot2Item = this.sgGeneral.add((Setting)((ItemSetting.Builder)((ItemSetting.Builder)((ItemSetting.Builder)new ItemSetting.Builder().name("slot-2-item")).description("Item to maintain in the second hotbar slot.")).defaultValue((Object)Items.AIR)).build());
-        this.slot3Item = this.sgGeneral.add((Setting)((ItemSetting.Builder)((ItemSetting.Builder)((ItemSetting.Builder)new ItemSetting.Builder().name("slot-3-item")).description("Item to maintain in the third hotbar slot.")).defaultValue((Object)Items.AIR)).build());
-        this.slot4Item = this.sgGeneral.add((Setting)((ItemSetting.Builder)((ItemSetting.Builder)((ItemSetting.Builder)new ItemSetting.Builder().name("slot-4-item")).description("Item to maintain in the fourth hotbar slot.")).defaultValue((Object)Items.AIR)).build());
-        this.slot5Item = this.sgGeneral.add((Setting)((ItemSetting.Builder)((ItemSetting.Builder)((ItemSetting.Builder)new ItemSetting.Builder().name("slot-5-item")).description("Item to maintain in the fifth hotbar slot.")).defaultValue((Object)Items.AIR)).build());
-        this.slot6Item = this.sgGeneral.add((Setting)((ItemSetting.Builder)((ItemSetting.Builder)((ItemSetting.Builder)new ItemSetting.Builder().name("slot-6-item")).description("Item to maintain in the sixth hotbar slot.")).defaultValue((Object)Items.AIR)).build());
-        this.slot7Item = this.sgGeneral.add((Setting)((ItemSetting.Builder)((ItemSetting.Builder)((ItemSetting.Builder)new ItemSetting.Builder().name("slot-7-item")).description("Item to maintain in the seventh hotbar slot.")).defaultValue((Object)Items.AIR)).build());
-        this.slot8Item = this.sgGeneral.add((Setting)((ItemSetting.Builder)((ItemSetting.Builder)((ItemSetting.Builder)new ItemSetting.Builder().name("slot-8-item")).description("Item to maintain in the eighth hotbar slot.")).defaultValue((Object)Items.AIR)).build());
-        this.slot9Item = this.sgGeneral.add((Setting)((ItemSetting.Builder)((ItemSetting.Builder)((ItemSetting.Builder)((ItemSetting.Builder)new ItemSetting.Builder().name("slot-9-item")).description("Item to maintain in the ninth hotbar slot.")).defaultValue((Object)Items.AIR)).visible(() -> (Boolean)this.highwayMode.get() == false)).build());
     }
 
     @EventHandler
-    private void onTick(TickEvent.Pre pre) {
-        if (HotbarReplenish.mc.player == null || HotbarReplenish.mc.world == null) {
-            return;
-        }
-        if (WorldUtils.checkForLag()) {
-            return;
-        }
-        if (((Boolean)this.highwayMode.get()).booleanValue()) {
+    private void onTick(TickEvent.Pre event) { // was: FvaNWO(Pre)
+        if (mc.player == null || mc.world == null) return;
+        if (this.highwayMode.get()) {
+            // Slots 1 and 9 are reserved for the highway builder; force them empty.
             PlayerUtils.setModuleSetting(HotbarReplenish.class, "slot-1-item", Items.AIR);
             PlayerUtils.setModuleSetting(HotbarReplenish.class, "slot-9-item", Items.AIR);
-            ItemStack[] ItemStackArray = new ItemStack[]{(ItemStack)this.slot2Item.get(), (ItemStack)this.slot3Item.get(), (ItemStack)this.slot4Item.get(), (ItemStack)this.slot5Item.get(), (ItemStack)this.slot6Item.get(), (ItemStack)this.slot7Item.get(), (ItemStack)this.slot8Item.get()};
+            Item[] itemsToCheck = {
+                this.slot2Item.get(), this.slot3Item.get(), this.slot4Item.get(), this.slot5Item.get(),
+                this.slot6Item.get(), this.slot7Item.get(), this.slot8Item.get()
+            };
             this.maintainPickaxe();
-            for (int i = 1; i <= 7; ++i) {
-                this.replenishSlot(i, ItemStackArray[i - 1]);
+            for (int i = 1; i <= 7; i++) {
+                this.replenishSlot(i, itemsToCheck[i - 1]);
             }
         } else {
-            ItemStack[] ItemStackArray = new ItemStack[]{(ItemStack)this.slot1Item.get(), (ItemStack)this.slot2Item.get(), (ItemStack)this.slot3Item.get(), (ItemStack)this.slot4Item.get(), (ItemStack)this.slot5Item.get(), (ItemStack)this.slot6Item.get(), (ItemStack)this.slot7Item.get(), (ItemStack)this.slot8Item.get(), (ItemStack)this.slot9Item.get(), (ItemStack)this.offhandSlot.get()};
-            for (int i = 0; i <= 7; ++i) {
-                this.replenishSlot(i, ItemStackArray[i]);
+            Item[] itemsToCheck = {
+                this.slot1Item.get(), this.slot2Item.get(), this.slot3Item.get(), this.slot4Item.get(), this.slot5Item.get(),
+                this.slot6Item.get(), this.slot7Item.get(), this.slot8Item.get(), this.slot9Item.get(), this.offhandItem.get()
+            };
+            for (int i = 0; i <= 7; i++) {
+                this.replenishSlot(i, itemsToCheck[i]);
             }
-            this.replenishSlot(45, (ItemStack)this.offhandSlot.get());
+            this.replenishSlot(45, this.offhandItem.get());
         }
     }
 
-    private void replenishSlot(int n, ItemStack ItemStack2) {
-        ItemStack ItemStack2;
-        int n2;
-        assert (HotbarReplenish.mc.player != null);
-        if (ItemStack2 == Items.AIR) {
-            return;
-        }
-        ItemStack ItemStack3 = n == 45 ? HotbarReplenish.mc.player.getOffHandStack() : HotbarReplenish.mc.player.getInventory().getStack(n);
-        if (ItemStack3.isEmpty()) {
-            int n3 = this.findBestSourceSlot(ItemStack2, n, 1);
-            if (n3 != -1) {
-                this.moveItemToSlot(n, n3);
+    /** Refills {@code slot} from the inventory if it is empty or below the threshold. */
+    private void replenishSlot(int slot, Item desiredItem) { // was: FvaNWO(int,Item)
+        assert mc.player != null;
+        if (desiredItem == Items.AIR) return;
+
+        ItemStack currentStack = slot == 45 ? mc.player.getOffHandStack() : mc.player.getInventory().getStack(slot);
+        if (currentStack.isEmpty()) {
+            int foundSlot = this.findRefillSlot(desiredItem, slot, 1);
+            if (foundSlot != -1) this.moveItem(slot, foundSlot);
+        } else if (currentStack.getItem() == desiredItem && currentStack.isStackable() && currentStack.getCount() <= this.threshold.get()) {
+            int foundSlot = this.findRefillSlot(desiredItem, slot, this.threshold.get() - currentStack.getCount() + 1);
+            if (foundSlot != -1) {
+                ItemStack foundStack = mc.player.getInventory().getStack(foundSlot);
+                if (ItemStack.areItemsAndComponentsEqual(currentStack, foundStack)) this.moveItem(slot, foundSlot);
             }
-        } else if (ItemStack3.getItem() == ItemStack2 && ItemStack3.isStackable() && ItemStack3.getCount() <= (Integer)this.threshold.get() && (n2 = this.findBestSourceSlot(ItemStack2, n, (Integer)this.threshold.get() - ItemStack3.getCount() + 1)) != -1 && ItemStack.areItemsEqual(ItemStack3, (ItemStack2 = HotbarReplenish.mc.player.getInventory().getStack(n2)))) {
-            this.moveItemToSlot(n, n2);
         }
     }
 
-    private int findBestSourceSlot(ItemStack ItemStack2, int n, int n2) {
-        int n3 = -1;
-        int n4 = 0;
-        assert (HotbarReplenish.mc.player != null);
-        for (int i = 35; i >= 0; --i) {
-            ItemStack ItemStack2;
-            if (i == n || this.isSlotManaged(i) || (ItemStack2 = HotbarReplenish.mc.player.getInventory().getStack(i)).getStack() != ItemStack2 || ItemStack2.getCount() <= n4) continue;
-            n3 = i;
-            n4 = ItemStack2.getCount();
-            if (n4 >= n2) break;
+    /** Finds the inventory slot holding the most of {@code item} (>= {@code goodEnoughCount} short-circuits), skipping managed slots. */
+    private int findRefillSlot(Item item, int excludedSlot, int goodEnoughCount) { // was: FvaNWO(Item,int,int)
+        int slot = -1;
+        int count = 0;
+        assert mc.player != null;
+        for (int i = 35; i >= 0; i--) {
+            if (i != excludedSlot && !this.isManagedSlot(i)) {
+                ItemStack stack = mc.player.getInventory().getStack(i);
+                if (stack.getItem() == item && stack.getCount() > count) {
+                    slot = i;
+                    count = stack.getCount();
+                    if (count >= goodEnoughCount) break;
+                }
+            }
         }
-        return n3;
+        return slot;
     }
 
-    private boolean isSlotManaged(int n) {
-        return n == 0 && this.slot1Item.get() != Items.AIR || n == 1 && this.slot2Item.get() != Items.AIR || n == 2 && this.slot3Item.get() != Items.AIR || n == 3 && this.slot4Item.get() != Items.AIR || n == 4 && this.slot5Item.get() != Items.AIR || n == 5 && this.slot6Item.get() != Items.AIR || n == 6 && this.slot7Item.get() != Items.AIR || n == 7 && this.slot8Item.get() != Items.AIR || n == 8 && this.slot9Item.get() != Items.AIR || n == 40 && this.offhandSlot.get() != Items.AIR;
+    /** True if {@code slot} is managed by a configured (non-AIR) setting and should not be raided. */
+    private boolean isManagedSlot(int slot) { // was: FvaNWO(int)
+        return slot == 0 && this.slot1Item.get() != Items.AIR
+            || slot == 1 && this.slot2Item.get() != Items.AIR
+            || slot == 2 && this.slot3Item.get() != Items.AIR
+            || slot == 3 && this.slot4Item.get() != Items.AIR
+            || slot == 4 && this.slot5Item.get() != Items.AIR
+            || slot == 5 && this.slot6Item.get() != Items.AIR
+            || slot == 6 && this.slot7Item.get() != Items.AIR
+            || slot == 7 && this.slot8Item.get() != Items.AIR
+            || slot == 8 && this.slot9Item.get() != Items.AIR
+            || slot == 40 && this.offhandItem.get() != Items.AIR;
     }
 
-    private void moveItemToSlot(int n, int n2) {
-        InvUtils.move().from(n2).to(n);
+    private void moveItem(int to, int from) { // was: FvaNWO(int,int)
+        InvUtils.move().from(from).to(to);
     }
 
-    private void maintainPickaxe() {
-        assert (HotbarReplenish.mc.player != null);
-        PlayerInventory playerInv = HotbarReplenish.mc.player.getInventory();
-        int n = 0;
-        ItemStack ItemStack2 = playerInv.getStack(n);
-        if (HighwayBuilder.getBuildMode() == HighwayBuilder.BuildMode.Pave && VersionHelper.get().isPickaxe(ItemStack2) && ((Boolean)MusheorSystem.Manager.preventToolBreaking.get() != false ? ItemStack2.getMaxDamage() - ItemStack2.getDamage() > (Integer)MusheorSystem.Manager.minToolDurability.get() && !Utils.hasEnchantments((ItemStack)ItemStack2, (RegistryKey[])new RegistryKey[]{Enchantments.SILK_TOUCH}) : !Utils.hasEnchantments((ItemStack)ItemStack2, (RegistryKey[])new RegistryKey[]{Enchantments.SILK_TOUCH}))) {
-            return;
-        }
-        if (HighwayBuilder.getBuildMode() == HighwayBuilder.BuildMode.Dig && VersionHelper.get().isPickaxe(ItemStack2)) {
-            if (((Boolean)MusheorSystem.Manager.preventToolBreaking.get()).booleanValue()) {
-                if (ItemStack2.getMaxDamage() - ItemStack2.getDamage() > (Integer)MusheorSystem.Manager.minToolDurability.get()) {
+    /** Keeps a usable pickaxe in the first hotbar slot for highway building (PAVE/DIG aware). */
+    private void maintainPickaxe() { // was: FvaNWO()
+        assert mc.player != null;
+        Inventory inventory = mc.player.getInventory();
+        int firstHotbarSlot = 0;
+        ItemStack firstHotbarStack = inventory.getStack(firstHotbarSlot);
+
+        if (HighwayBuilder.getBuildMode() == HighwayBuilder.BuildMode.PAVE && VersionHelper.get().isPickaxe(firstHotbarStack)) {
+            if (MusheorSystem.Manager.preventToolBreaking.get()) {
+                if (firstHotbarStack.getMaxDamage() - firstHotbarStack.getDamage() > MusheorSystem.Manager.minToolDurability.get()
+                    && !Utils.hasEnchantments(firstHotbarStack, Enchantments.SILK_TOUCH)) {
                     return;
                 }
-            } else {
+            } else if (!Utils.hasEnchantments(firstHotbarStack, Enchantments.SILK_TOUCH)) {
                 return;
             }
         }
-        int n2 = -1;
-        for (int i = 0; i < playerInv.size(); ++i) {
-            if (i == n) continue;
-            ItemStack ItemStack3 = playerInv.getStack(i);
-            if (HighwayBuilder.getBuildMode() == HighwayBuilder.BuildMode.Pave && VersionHelper.get().isPickaxe(ItemStack3)) {
-                if (((Boolean)MusheorSystem.Manager.preventToolBreaking.get()).booleanValue()) {
-                    if (ItemStack3.getMaxDamage() - ItemStack3.getDamage() > (Integer)MusheorSystem.Manager.minToolDurability.get() && !Utils.hasEnchantments((ItemStack)ItemStack3, (RegistryKey[])new RegistryKey[]{Enchantments.SILK_TOUCH})) {
-                        n2 = i;
+
+        if (HighwayBuilder.getBuildMode() == HighwayBuilder.BuildMode.DIG && VersionHelper.get().isPickaxe(firstHotbarStack)) {
+            if (!MusheorSystem.Manager.preventToolBreaking.get()) return;
+            if (firstHotbarStack.getMaxDamage() - firstHotbarStack.getDamage() > MusheorSystem.Manager.minToolDurability.get()) return;
+        }
+
+        int bestSlot = -1;
+        for (int i = 0; i < inventory.size(); i++) {
+            if (i == firstHotbarSlot) continue;
+            ItemStack stack = inventory.getStack(i);
+            if (HighwayBuilder.getBuildMode() == HighwayBuilder.BuildMode.PAVE && VersionHelper.get().isPickaxe(stack)) {
+                if (MusheorSystem.Manager.preventToolBreaking.get()) {
+                    if (stack.getMaxDamage() - stack.getDamage() > MusheorSystem.Manager.minToolDurability.get()
+                        && !Utils.hasEnchantments(stack, Enchantments.SILK_TOUCH)) {
+                        bestSlot = i;
                         break;
                     }
-                } else if (!Utils.hasEnchantments((ItemStack)ItemStack3, (RegistryKey[])new RegistryKey[]{Enchantments.SILK_TOUCH})) {
-                    n2 = i;
+                } else if (!Utils.hasEnchantments(stack, Enchantments.SILK_TOUCH)) {
+                    bestSlot = i;
                     break;
                 }
             }
-            if (HighwayBuilder.getBuildMode() != HighwayBuilder.BuildMode.Dig || !VersionHelper.get().isPickaxe(ItemStack3)) continue;
-            if (((Boolean)MusheorSystem.Manager.preventToolBreaking.get()).booleanValue()) {
-                if (ItemStack3.getMaxDamage() - ItemStack3.getDamage() <= (Integer)MusheorSystem.Manager.minToolDurability.get()) continue;
-                n2 = i;
-                break;
+
+            if (HighwayBuilder.getBuildMode() == HighwayBuilder.BuildMode.DIG && VersionHelper.get().isPickaxe(stack)) {
+                if (!MusheorSystem.Manager.preventToolBreaking.get()) {
+                    bestSlot = i;
+                    break;
+                }
+                if (stack.getMaxDamage() - stack.getDamage() > MusheorSystem.Manager.minToolDurability.get()) {
+                    bestSlot = i;
+                    break;
+                }
             }
-            n2 = i;
-            break;
         }
-        if (n2 != -1) {
-            InvUtils.move().from(n2).toHotbar(n);
+
+        if (bestSlot != -1) {
+            InvUtils.move().from(bestSlot).toHotbar(firstHotbarSlot);
         }
     }
 }
-

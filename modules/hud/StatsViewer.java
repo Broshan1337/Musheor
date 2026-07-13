@@ -1,8 +1,10 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// Class name was already readable; internal members were obfuscated.
 package musheor.modules.hud;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.ColorSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
@@ -14,96 +16,128 @@ import meteordevelopment.meteorclient.systems.hud.HudElementInfo;
 import meteordevelopment.meteorclient.systems.hud.HudRenderer;
 import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
-import musheor.modules.automation.HighwayBuilder;
 import musheor.musheor;
+import musheor.modules.automation.HighwayBuilder;
 import musheor.utils.StatsHandler;
 import musheor.utils.internal.HighwayState;
 import net.minecraft.client.MinecraftClient;
 
-public class StatsViewer
-extends HudElement {
-    private final SettingGroup sgGeneral;
-    public static final HudElementInfo<StatsViewer> INFO = new HudElementInfo(musheor.MUSHEOR_HUD, "stats-viewer", "View your stats while using the HighwayBuilder module.", StatsViewer::new);
-    private final Setting<Double> scale;
-    private final Setting<Integer> sectionSize;
-    private final Setting<Boolean> displaySession;
-    private final Setting<Boolean> displayBlocks;
-    private final Setting<Boolean> displayPerformance;
-    private final Setting<Boolean> displayInfo;
-    private final Setting<Boolean> displayLifetime;
-    private final Setting<SettingColor> prefixColor;
-    private final Setting<SettingColor> valueColor;
+/**
+ * "stats-viewer" HUD — shows HighwayBuilder statistics: the latest session (runtime,
+ * direction, distance), block counts (session and lifetime obsidian/echest/netherrack),
+ * performance rates (placements/breaks/distance per second/hour), and info (distance/ETA
+ * to next section, material count, refill ETA). Each group can be toggled independently.
+ */
+public class StatsViewer extends HudElement {
+    private final SettingGroup sgGeneral = this.settings.getDefaultGroup(); // was: FvaNWO
+    public static final HudElementInfo<StatsViewer> INFO = new HudElementInfo<>(
+        musheor.MUSHEOR_HUD, "stats-viewer", "View your stats while using the HighwayBuilder module.", StatsViewer::new);
+
+    private final Setting<Double> scale = sgGeneral.add(new DoubleSetting.Builder() // was: Q90GLXQ0Pef
+        .name("scale").description("I mean cmon do I really have to explain??").defaultValue(1.0).build());
+    private final Setting<Integer> sectionSize = sgGeneral.add(new IntSetting.Builder() // was: psJq59YIbp3Z
+        .name("section-size").description("Distance or size of a single highway section").defaultValue(10000).build());
+    private final Setting<Boolean> displaySession = sgGeneral.add(new BoolSetting.Builder() // was: SOYyh5IPg26f7F
+        .name("display-session").description("Display statistics of the current session.").defaultValue(true).build());
+    private final Setting<Boolean> displayBlocks = sgGeneral.add(new BoolSetting.Builder() // was: rKbT3Ifwo
+        .name("display-blocks").description("Display statistics of blocks mined and placed.").defaultValue(true).build());
+    private final Setting<Boolean> displayPerformance = sgGeneral.add(new BoolSetting.Builder() // was: r7hOYIKN2
+        .name("display-performance").description("Display statistics of paver's performance.").defaultValue(true).build());
+    private final Setting<Boolean> displayInfo = sgGeneral.add(new BoolSetting.Builder() // was: oZHMlTL
+        .name("display-info").description("Display extra information about the environment, inventory and ETA.").defaultValue(false).build());
+    private final Setting<Boolean> displayLifetime = sgGeneral.add(new BoolSetting.Builder() // was: xQr5FhbwpQPWgIQ
+        .name("display-lifetime").description("Display lifetime statistics about the paver.").defaultValue(true).build());
+    private final Setting<SettingColor> prefixColor = sgGeneral.add(new ColorSetting.Builder() // was: OMMZL1F3q
+        .name("prefix-color").description("Text color of the hud info lines.").defaultValue(new SettingColor(255, 255, 225, 255)).build());
+    private final Setting<SettingColor> valueColor = sgGeneral.add(new ColorSetting.Builder() // was: zu3a44xDeMFMCRwm
+        .name("value-color").description("Text color of the hud info lines.").defaultValue(new SettingColor(255, 0, 208, 255)).build());
 
     public StatsViewer() {
         super(INFO);
-        this.sgGeneral = this.settings.getDefaultGroup();
-        this.scale = this.sgGeneral.add((Setting)((DoubleSetting.Builder)((DoubleSetting.Builder)new DoubleSetting.Builder().name("scale")).description("I mean cmon do I really have to explain??")).defaultValue(1.0).build());
-        this.sectionSize = this.sgGeneral.add((Setting)((IntSetting.Builder)((IntSetting.Builder)((IntSetting.Builder)new IntSetting.Builder().name("section-size")).description("Distance or size of a single highway section")).defaultValue((Object)100000)).build());
-        this.displaySession = this.sgGeneral.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("display-session")).description("Display statistics of the current session.")).defaultValue((Object)true)).build());
-        this.displayBlocks = this.sgGeneral.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("display-blocks")).description("Display statistics of blocks mined and placed.")).defaultValue((Object)true)).build());
-        this.displayPerformance = this.sgGeneral.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("display-performance")).description("Display statistics of paver's performance.")).defaultValue((Object)true)).build());
-        this.displayInfo = this.sgGeneral.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("display-info")).description("Display extra information about the environment, inventory and ETA.")).defaultValue((Object)true)).build());
-        this.displayLifetime = this.sgGeneral.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("display-lifetime")).description("Display lifetime statistics about the paver.")).defaultValue((Object)true)).build());
-        this.prefixColor = this.sgGeneral.add((Setting)((ColorSetting.Builder)((ColorSetting.Builder)new ColorSetting.Builder().name("prefix-color")).description("Text color of the hud info lines.")).defaultValue(new SettingColor(255, 255, 225, 255)).build());
-        this.valueColor = this.sgGeneral.add((Setting)((ColorSetting.Builder)((ColorSetting.Builder)new ColorSetting.Builder().name("value-color")).description("Text color of the hud info lines.")).defaultValue(new SettingColor(255, 0, 208, 255)).build());
     }
 
-    private String[][] buildStatsRows() {
-        ArrayList arrayList = new ArrayList();
-        HighwayState highwayState = HighwayState.getInstance();
-        String[][] stringArrayArray = new String[][]{{"Latest session: ", ""}, {"  Runtime: ", StatsHandler.formatTicksAsTime(highwayState.getTicksActive())}, {"  Direction: ", String.valueOf((Object)HighwayBuilder.getDirection()).toLowerCase()}, {"  Distance travelled: ", String.valueOf(StatsHandler.getDistanceToCheckpoint())}};
-        String[][] stringArrayArray2 = new String[][]{{"Blocks", ""}, {"  Obsidian Placed: ", String.valueOf(highwayState.getSessionObsidianPlacedCount())}, {"  Obsidian Mined: ", String.valueOf(highwayState.getSessionObsidianMinedCount())}, {"  Enderchests mined: ", String.valueOf(highwayState.getSessionMiscMinedCount())}, {"  Netherrack mined: ", String.valueOf(highwayState.getSessionLavaBucketCount())}, {"  Total mined: ", String.valueOf(highwayState.getSessionObsidianMinedCount() + highwayState.getSessionLavaBucketCount() + highwayState.getSessionMiscMinedCount())}};
-        String[][] stringArrayArray3 = new String[][]{{"Performance", ""}, {"  Placements / s: ", StatsHandler.formatBlocksPerSecond(StatsHandler.getBlocksPlacedPerSecond())}, {"  Placements / h: ", StatsHandler.formatBlocksPerHour(StatsHandler.getBlocksPlacedPerSecond())}, {"  Breaks / s: ", StatsHandler.formatBlocksPerSecond(StatsHandler.getBlocksMinedPerSecond())}, {"  Distance / s: ", StatsHandler.formatDistancePerSecond(StatsHandler.getDistanceToCheckpoint())}, {"  Distance / h: ", StatsHandler.formatDistancePerHour(StatsHandler.getDistanceToCheckpoint())}};
-        String[][] stringArrayArray4 = new String[][]{{"Info", ""}, {"  Distance to next section: ", String.valueOf(StatsHandler.getDistanceToNextMultiple((Integer)this.sectionSize.get()))}, {"  Percentage completed: ", StatsHandler.getPercentOffset((Integer)this.sectionSize.get())}, {"  Material Count: ", String.valueOf(StatsHandler.countObsidianBlocks())}, {"  ETA to next section: ", StatsHandler.formatCheckpointETA((Integer)this.sectionSize.get())}, {"  ETA to next refill: ", StatsHandler.formatObsidianETA()}};
-        String[][] stringArrayArray5 = new String[][]{{"Lifetime: ", ""}, {"  Obsidian Placed: ", String.valueOf(highwayState.getLifetimeObsidianPlaced())}, {"  Obsidian Mined: ", String.valueOf(highwayState.getLifetimeObsidianMined())}, {"  Enderchests mined: ", String.valueOf(highwayState.getLifetimeLavaBuckets())}, {"  Netherrack mined: ", String.valueOf(highwayState.getLifetimeMiscBlocks())}, {"  Other mined: ", String.valueOf(highwayState.getLifetimeMiscMined())}};
-        if (((Boolean)this.displaySession.get()).booleanValue()) {
-            arrayList.addAll(Arrays.asList(stringArrayArray));
-        }
-        if (((Boolean)this.displayBlocks.get()).booleanValue()) {
-            arrayList.addAll(Arrays.asList(stringArrayArray2));
-        }
-        if (((Boolean)this.displayPerformance.get()).booleanValue()) {
-            arrayList.addAll(Arrays.asList(stringArrayArray3));
-        }
-        if (((Boolean)this.displayInfo.get()).booleanValue()) {
-            arrayList.addAll(Arrays.asList(stringArrayArray4));
-        }
-        if (((Boolean)this.displayLifetime.get()).booleanValue()) {
-            arrayList.addAll(Arrays.asList(stringArrayArray5));
-        }
-        return (String[][])arrayList.toArray((T[])new String[0][]);
+    /** Builds the enabled stat-line groups as {label, value} rows. */
+    private String[][] buildLines() { // was: FvaNWO()
+        List<String[]> lines = new ArrayList<>();
+        HighwayState state = HighwayState.getInstance();
+        String[][] session = {
+            {"Latest session: ", ""},
+            {"  Runtime: ", StatsHandler.formatTicksAsClock(state.getTicksActive())},
+            {"  Direction: ", String.valueOf(HighwayBuilder.getDirection()).toLowerCase()},
+            {"  Distance travelled: ", String.valueOf(StatsHandler.getDistanceTravelled())}
+        };
+        String[][] blocks = {
+            {"Blocks", ""},
+            {"  Obsidian Placed: ", StatsHandler.abbreviate(state.getSessionObsidianPlaced())},
+            {"  Obsidian Mined: ", StatsHandler.abbreviate(state.getSessionObsidianMined())},
+            {"  Enderchests mined: ", StatsHandler.abbreviate(state.getSessionMiscMined())},
+            {"  Netherrack mined: ", StatsHandler.abbreviate(state.getSessionLavaBuckets())},
+            {"  Total mined: ", StatsHandler.abbreviate(state.getSessionObsidianMined() + state.getSessionLavaBuckets() + state.getSessionMiscMined())}
+        };
+        String[][] performance = {
+            {"Performance", ""},
+            {"  Placements / s: ", StatsHandler.formatPlacementsPerSecond(StatsHandler.getBlocksPlacedPerSecond())},
+            {"  Placements / h: ", StatsHandler.formatPlacementsPerHour(StatsHandler.getBlocksPlacedPerSecond())},
+            {"  Breaks / s: ", StatsHandler.formatBreakingPerSecond(StatsHandler.getBlocksMinedPerSecond())},
+            {"  Distance / s: ", StatsHandler.formatDistancePerSecond(StatsHandler.getDistanceTravelled())},
+            {"  Distance / h: ", StatsHandler.formatDistancePerHour(StatsHandler.getDistanceTravelled())}
+        };
+        String[][] info = {
+            {"Info", ""},
+            {"  Distance to next section: ", String.valueOf(StatsHandler.getBlocksLeftInSection(this.sectionSize.get()))},
+            {"  Percentage completed: ", StatsHandler.getPercentComplete(this.sectionSize.get())},
+            {"  Material Count: ", String.valueOf(StatsHandler.getAvailableObsidian())},
+            {"  ETA to next section: ", StatsHandler.formatSectionEta(this.sectionSize.get())},
+            {"  ETA to next refill: ", StatsHandler.formatMiningEta()}
+        };
+        String[][] lifetime = {
+            {"Lifetime: ", ""},
+            {"  Obsidian Placed: ", StatsHandler.abbreviate(state.getLifetimeObsidianPlaced())},
+            {"  Obsidian Mined: ", StatsHandler.abbreviate(state.getLifetimeObsidianMined())},
+            {"  Enderchests mined: ", StatsHandler.abbreviate(state.getLifetimeEchests())},
+            {"  Netherrack mined: ", StatsHandler.abbreviate(state.getLifetimeMiscBlocks())},
+            {"  Total mined: ", StatsHandler.abbreviate(state.getLifetimeTotalMined())}
+        };
+        if (this.displaySession.get()) lines.addAll(Arrays.asList(session));
+        if (this.displayBlocks.get()) lines.addAll(Arrays.asList(blocks));
+        if (this.displayPerformance.get()) lines.addAll(Arrays.asList(performance));
+        if (this.displayInfo.get()) lines.addAll(Arrays.asList(info));
+        if (this.displayLifetime.get()) lines.addAll(Arrays.asList(lifetime));
+        return lines.toArray(new String[0][]);
     }
 
-    public void render(HudRenderer hudRenderer) {
-        if (MinecraftClient.getInstance().player == null || MinecraftClient.getInstance().world == null) {
-            return;
+    @Override
+    public void render(HudRenderer renderer) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.player == null || mc.world == null) return;
+        String[][] lines = this.buildLines();
+        double lineHeight = renderer.textHeight(true, this.scale.get());
+        double width = 0.0;
+        for (String[] line : lines) {
+            double lineWidth = renderer.textWidth(line[0], true) + renderer.textWidth(": ", true) + renderer.textWidth(line[1], true, this.scale.get());
+            width = Math.max(width, lineWidth);
         }
-        String[][] stringArray = this.buildStatsRows();
-        double d = hudRenderer.textHeight(true, ((Double)this.scale.get()).doubleValue());
-        double d2 = 0.0;
-        for (String[] stringArray2 : stringArray) {
-            double d3 = hudRenderer.textWidth(stringArray2[0], true) + hudRenderer.textWidth(": ", true) + hudRenderer.textWidth(stringArray2[1], true, ((Double)this.scale.get()).doubleValue());
-            d2 = Math.max(d2, d3);
-        }
-        this.setSize(d2, d * (double)stringArray.length);
-        double d4 = this.y;
-        for (String[] stringArray3 : stringArray) {
-            double d5 = this.x;
-            hudRenderer.text(stringArray3[0], d5, d4, (Color)this.prefixColor.get(), true, ((Double)this.scale.get()).doubleValue());
-            hudRenderer.text("", d5 += hudRenderer.textWidth(stringArray3[0], true, ((Double)this.scale.get()).doubleValue()), d4, (Color)this.prefixColor.get(), true, ((Double)this.scale.get()).doubleValue());
-            d5 += hudRenderer.textWidth("", true, ((Double)this.scale.get()).doubleValue());
-            if (stringArray3[0].equals("Progress")) {
-                String string = stringArray3[1];
-                String string2 = " done";
-                double d6 = hudRenderer.textWidth(string, true);
-                hudRenderer.textWidth(string2, true, ((Double)this.scale.get()).doubleValue());
-                hudRenderer.text(string, d5, d4, (Color)this.valueColor.get(), true, ((Double)this.scale.get()).doubleValue());
-                hudRenderer.text(string2, d5 += d6, d4, (Color)this.prefixColor.get(), true, ((Double)this.scale.get()).doubleValue());
+        this.setSize(width, lineHeight * lines.length);
+
+        double currentY = this.y;
+        for (String[] line : lines) {
+            double currentX = this.x;
+            renderer.text(line[0], currentX, currentY, this.prefixColor.get(), true, this.scale.get());
+            currentX += renderer.textWidth(line[0], true, this.scale.get());
+            renderer.text("", currentX, currentY, this.prefixColor.get(), true, this.scale.get());
+            currentX += renderer.textWidth("", true, this.scale.get());
+            if (line[0].equals("Progress")) {
+                String percentageText = line[1];
+                String doneText = " done";
+                double percentageWidth = renderer.textWidth(percentageText, true);
+                renderer.textWidth(doneText, true, this.scale.get());
+                renderer.text(percentageText, currentX, currentY, this.valueColor.get(), true, this.scale.get());
+                currentX += percentageWidth;
+                renderer.text(doneText, currentX, currentY, this.prefixColor.get(), true, this.scale.get());
             } else {
-                hudRenderer.text(stringArray3[1], d5, d4, (Color)this.valueColor.get(), true, ((Double)this.scale.get()).doubleValue());
+                renderer.text(line[1], currentX, currentY, this.valueColor.get(), true, this.scale.get());
             }
-            d4 += d;
+            currentY += lineHeight;
         }
     }
 }
-

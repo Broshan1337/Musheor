@@ -1,256 +1,176 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// (source class was obfuscated as obf.fVHOZ)
 package musheor.utils;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
 import meteordevelopment.meteorclient.MeteorClient;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import musheor.modules.automation.HighwayBuilder;
-import musheor.utils.InventoryManager;
-import musheor.utils.WorldUtils;
+import musheor.modules.automation.InventoryManager;
 import musheor.utils.internal.HighwayState;
-import net.minecraft.item.Items; // Items
+import net.minecraft.item.Items;
 
 /**
- * Handles persistent highway statistics, stored locally in
- * MeteorClient.FOLDER/musheor/data.csv. Also provides helper methods
- * for formatting and computing rates/ETAs shown in the HUD.
+ * Highway statistics: distance travelled, placement/mining rates, ETAs, and the
+ * human-readable number/clock formatters used by the HUD and Discord RPC.
+ *
+ * In 1.5 this class also persisted lifetime totals to {@code data.csv}; in 1.6.1
+ * that CSV persistence was removed — lifetime totals now come from Minecraft's own
+ * StatHandler via {@link StatsCollector}. This class holds only the live math.
  */
 public class StatsHandler {
-    /** Persistent CSV file for lifetime highway statistics. */
-    private static final File DATA_FILE = new File(MeteorClient.FOLDER, "musheor/data.csv");
+    /** Cached distance travelled, refreshed while HighwayBuilder is active. */
+    public static int cachedDistance = 0; // was: FvaNWO (field)
 
-    /** Tracks distance traveled since the highway builder was enabled. */
-    public static int distanceTraveled = 0;
-
-    // -------------------------------------------------------------------------
-    // File I/O
-    // -------------------------------------------------------------------------
-
-    /** Write all rows to the CSV file (overwrites existing content). */
-    public static void writeData(List<String[]> rows) {
-        try {
-            FileWriter fw = new FileWriter(DATA_FILE);
-            for (CharSequence[] row : rows) {
-                fw.write(String.join(",", row));
-                fw.write("\n");
-            }
-            fw.close();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+    /** Percentage of the current section completed, formatted to 2 decimals. */
+    public static String getPercentComplete(int sectionSize) { // was: FvaNWO(int)
+        double distanceLeft = getBlocksLeftInSection(sectionSize);
+        double percentage = (sectionSize - distanceLeft) / sectionSize * 100.0;
+        return String.format("%.2f", percentage);
     }
 
-    /** Read all rows from the CSV file. */
-    public static List<String[]> readData() {
-        ArrayList<String[]> result = new ArrayList<>();
-        try {
-            BufferedReader br = new BufferedReader(new FileReader(DATA_FILE));
-            String line;
-            while ((line = br.readLine()) != null) {
-                result.add(line.split(","));
-            }
-            br.close();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        return result;
-    }
-
-    /**
-     * Called once on addon init. Creates the data.csv file with zeroed rows
-     * if it does not already exist.
-     */
-    public static void initDataFile() {
-        try {
-            if (!DATA_FILE.getParentFile().exists()) {
-                DATA_FILE.getParentFile().mkdirs();
-            }
-            if (!DATA_FILE.exists() && DATA_FILE.createNewFile()) {
-                try (FileWriter fw = new FileWriter(DATA_FILE)) {
-                    for (int i = 0; i <= 4; i++) {
-                        fw.write("0,\n");
-                    }
-                }
-                System.out.println("Created data.csv with headers.");
-            }
-        } catch (IOException e) {
-            System.err.println("Failed to create data.csv: " + e.getMessage());
-        }
-    }
-
-    // -------------------------------------------------------------------------
-    // Distance / ETA calculations
-    // -------------------------------------------------------------------------
-
-    /**
-     * Returns the percentage of the distance to the next checkpoint that has
-     * been completed, as a formatted string.
-     */
-    public static String getPercentOffset(int checkpointInterval) {
-        double distToNext = getDistanceToNextMultiple(checkpointInterval);
-        double pct = ((double) checkpointInterval - distToNext) / (double) checkpointInterval * 100.0;
-        return String.format("%.2f", pct);
-    }
-
-    /**
-     * Calculates how many blocks remain until the next multiple of
-     * {@code interval} along the current highway axis.
-     */
-    public static int calculateDistanceToNextCheckpoint() {
-        WorldUtils.Direction8 dir = HighwayBuilder.getDirection();
+    /** Distance travelled along the highway axis since the module was enabled. */
+    public static int computeDistanceTravelled() { // was: FvaNWO()
+        HighwayState.getInstance();
+        WorldUtils.Direction8 direction = HighwayBuilder.getDirection();
         assert MeteorClient.mc.player != null;
-        int pos;
-        if (dir == WorldUtils.Direction8.NORTH || dir == WorldUtils.Direction8.SOUTH) {
-            pos = Math.abs(MeteorClient.mc.player.getZ()) - Math.abs(HighwayState.getInstance().getStartZ());
-        } else if (dir == WorldUtils.Direction8.EAST || dir == WorldUtils.Direction8.WEST) {
-            pos = Math.abs(MeteorClient.mc.player.getX()) - Math.abs(HighwayState.getInstance().getStartX());
-        } else {
-            // Diagonal highways use X distance
-            pos = Math.abs(Math.abs(MeteorClient.mc.player.getX()) - Math.abs(HighwayState.getInstance().getStartX()));
+        int distanceTravelled = 0;
+        if (direction == WorldUtils.Direction8.NORTH || direction == WorldUtils.Direction8.SOUTH) {
+            distanceTravelled = Math.abs(MeteorClient.mc.player.getBlockZ()) - Math.abs(HighwayState.getInstance().getStartZ());
+        } else if (direction == WorldUtils.Direction8.EAST || direction == WorldUtils.Direction8.WEST) {
+            distanceTravelled = Math.abs(MeteorClient.mc.player.getBlockX()) - Math.abs(HighwayState.getInstance().getStartX());
         }
-        return Math.abs(pos);
+        if (direction == WorldUtils.Direction8.NORTH_EAST || direction == WorldUtils.Direction8.NORTH_WEST
+            || direction == WorldUtils.Direction8.SOUTH_EAST || direction == WorldUtils.Direction8.SOUTH_WEST) {
+            distanceTravelled = Math.abs(Math.abs(MeteorClient.mc.player.getBlockX()) - Math.abs(HighwayState.getInstance().getStartX()));
+        }
+        return Math.abs(distanceTravelled);
     }
 
-    /**
-     * Returns the distance traveled stat (updates if HighwayBuilder is active).
-     */
-    public static int getDistanceToCheckpoint() {
+    /** Returns the cached distance travelled, refreshing it if the module is active. */
+    public static int getDistanceTravelled() { // was: Q90GLXQ0Pef()
         if (((HighwayBuilder) Modules.get().get(HighwayBuilder.class)).isActive()) {
-            distanceTraveled = calculateDistanceToNextCheckpoint();
+            cachedDistance = computeDistanceTravelled();
         }
-        return distanceTraveled;
+        return cachedDistance;
     }
 
-    /** Returns current obsidian placement rate in blocks/second, or -1 if inactive. */
-    public static double getBlocksPlacedPerSecond() {
+    /** Obsidian blocks placed per second this session (-1 = idle). */
+    public static double getBlocksPlacedPerSecond() { // was: psJq59YIbp3Z()
         if (!((HighwayBuilder) Modules.get().get(HighwayBuilder.class)).isActive()) return -1.0;
-        double placed = HighwayState.getInstance().getSessionObsidianPlacedCount();
-        double ticks  = HighwayState.getInstance().getTicksActive();
-        if (placed == 0.0 || ticks == 0.0) return 0.0;
-        return placed / (ticks / 20.0);
+        double obsidianPlaced = HighwayState.getInstance().getSessionObsidianPlaced();
+        double ticksPassed = HighwayState.getInstance().getTicksActive();
+        return obsidianPlaced != 0.0 && ticksPassed != 0.0 ? obsidianPlaced / (ticksPassed / 20.0) : 0.0;
     }
 
-    /** Returns combined block mining rate (obsidian + other) in blocks/second, or -1 if inactive. */
-    public static double getBlocksMinedPerSecond() {
+    /** Blocks broken per second this session (obsidian + lava + misc; -1 = idle). */
+    public static double getBlocksMinedPerSecond() { // was: SOYyh5IPg26f7F()
         if (!((HighwayBuilder) Modules.get().get(HighwayBuilder.class)).isActive()) return -1.0;
         HighwayState state = HighwayState.getInstance();
-        double mined = state.getSessionObsidianMinedCount() + state.getSessionLavaBucketCount() + state.getSessionMiscMinedCount();
-        double ticks  = state.getTicksActive();
-        if (mined == 0.0 || ticks == 0.0) return 0.0;
-        return mined / (ticks / 20.0);
+        double blocksBroken = state.getSessionObsidianMined() + state.getSessionLavaBuckets() + state.getSessionMiscMined();
+        double ticksPassed = state.getTicksActive();
+        return blocksBroken != 0.0 && ticksPassed != 0.0 ? blocksBroken / (ticksPassed / 20.0) : 0.0;
     }
 
-    /** Count of total obsidian blocks in player inventory (echest stacks + loose obsidian). */
-    public static int countObsidianBlocks() {
-        return InventoryManager.countItem(Items.ENDER_CHEST) * 8 + InventoryManager.countItem(Items.OBSIDIAN);
+    /** Obsidian available in inventory (ender chests count as 8 obsidian each). */
+    public static int getAvailableObsidian() { // was: rKbT3Ifwo()
+        return InventoryManager.countItemIncludingShulkers(Items.ENDER_CHEST) * 8
+             + InventoryManager.countItemIncludingShulkers(Items.OBSIDIAN);
     }
 
-    /** Returns {@code value / (ticks / 20)}, i.e. a per-second rate. Returns 0 if ticks is 0. */
-    public static double calcRate(double value, double ticks) {
-        double seconds = ticks / 20.0;
-        if (seconds <= 0.0) return 0.0;
-        return value / seconds;
+    /** Rate = distance / seconds (seconds = ticks / 20). */
+    public static double ratePerSecond(double distanceTravelled, double ticksPassed) { // was: FvaNWO(double,double)
+        double secondsPassed = ticksPassed / 20.0;
+        return secondsPassed <= 0.0 ? 0.0 : distanceTravelled / secondsPassed;
     }
 
-    /**
-     * Estimates ticks until {@code distance} is covered at current rate.
-     * Returns -1 if waiting for data, -2 if distance < 2 blocks.
-     */
-    public static double calcETA(int distance) {
+    /** ETA rate for reaching the next section boundary (-2/-1 = calculating/waiting). */
+    public static double getSectionEtaRate(int sectionSize) { // was: Q90GLXQ0Pef(int)
         HighwayState state = HighwayState.getInstance();
-        if (getDistanceToCheckpoint() < 1 || state.getTicksActive() < 1) return 0.0;
-        long traveled = getDistanceToCheckpoint();
-        long ticks    = state.getTicksActive();
-        long speed    = getDistanceToCheckpoint() / (ticks / 20);
-        if (traveled <= 1L) return -2.0;
-        if (ticks <= 200) return -1.0;
-        return (double) getDistanceToNextMultiple(distance) / calcRate(traveled, ticks);
+        if (((HighwayBuilder) Modules.get().get(HighwayBuilder.class)).isActive()) {
+            long remainingDistance = getBlocksLeftInSection(sectionSize);
+            long distanceTravelled = getDistanceTravelled();
+            if (distanceTravelled <= 1L) return -2.0;
+            return state.getTicksActive() <= 200
+                ? -1.0
+                : remainingDistance / ratePerSecond(distanceTravelled, state.getTicksActive());
+        }
+        return 0.0;
     }
 
-    /**
-     * Returns how many blocks remain until the player's coordinate is a multiple
-     * of {@code interval} along the current highway axis.
-     */
-    public static int getDistanceToNextMultiple(int interval) {
+    /** Blocks left until the next section boundary along the travel axis. */
+    public static int getBlocksLeftInSection(int sectionSize) { // was: psJq59YIbp3Z(int)
         assert MeteorClient.mc.player != null;
-        WorldUtils.Direction8 dir = HighwayBuilder.getDirection();
-        int coord;
-        switch (dir) {
-            case NORTH: case SOUTH:
-                coord = MeteorClient.mc.player.getZ(); break;
-            case EAST: case WEST:
-            case NORTH_EAST: case NORTH_WEST:
-            case SOUTH_EAST: case SOUTH_WEST:
-            default:
-                coord = MeteorClient.mc.player.getX(); break;
+        WorldUtils.Direction8 direction = HighwayBuilder.getDirection();
+        int blockCoordinate = switch (direction) {
+            case NORTH, SOUTH -> MeteorClient.mc.player.getBlockZ();
+            case EAST, WEST, NORTH_EAST, NORTH_WEST, SOUTH_EAST, SOUTH_WEST -> MeteorClient.mc.player.getBlockX();
+            case null, default -> 0;
+        };
+        int sectionStart = Math.floorDiv(blockCoordinate, sectionSize) * sectionSize;
+        int sectionEnd = sectionStart + sectionSize;
+        if (direction == WorldUtils.Direction8.SOUTH || direction == WorldUtils.Direction8.WEST
+            || direction == WorldUtils.Direction8.NORTH_EAST || direction == WorldUtils.Direction8.SOUTH_EAST) {
+            sectionStart = sectionEnd;
         }
-        int floor = Math.floorDiv(coord, interval) * interval;
-        int next  = floor + interval;
-        // For negative-direction travel, the "next" multiple is the floor, not floor+interval
-        if (dir == WorldUtils.Direction8.SOUTH || dir == WorldUtils.Direction8.WEST
-                || dir == WorldUtils.Direction8.SOUTH_EAST || dir == WorldUtils.Direction8.SOUTH_WEST) {
-            next = floor;
-        }
-        return Math.abs(next - coord);
+        return Math.abs(sectionStart - blockCoordinate);
     }
 
-    // -------------------------------------------------------------------------
-    // Formatting helpers
-    // -------------------------------------------------------------------------
+    // ---- Formatters -------------------------------------------------------
 
-    public static String formatBlocksPerSecond(double bps) {
-        if (bps == -1.0) return "Waiting...";
-        return String.format("%.2f blocks / s", bps);
+    /** Abbreviates large numbers: 1_500_000 → "1.50m", 2_500 → "2.50k". */
+    public static String abbreviate(int value) { // was: SOYyh5IPg26f7F(int)
+        if (value >= 1_000_000) return String.format("%.2fm", value / 1_000_000.0);
+        return value >= 1_000 ? String.format("%.2fk", value / 1_000.0) : String.valueOf(value);
     }
 
-    public static String formatBlocksPerHour(double bps) {
-        if (bps == -1.0) return "Waiting...";
-        return String.format("%.2f blocks / h", bps * 3600.0);
+    public static String formatPlacementsPerSecond(double placementsPerSecond) { // was: FvaNWO(double)
+        return placementsPerSecond == -1.0 ? "Waiting..." : String.format("%.2f blocks / s", placementsPerSecond);
     }
 
-    public static String formatDistancePerSecond(int distance) {
-        if (distance < 1) return "Waiting...";
-        return String.format("%.2f blocks / s",
-            (float) calcRate(distance, HighwayState.getInstance().getTicksActive()));
+    public static String formatPlacementsPerHour(double placementsPerSecond) { // was: Q90GLXQ0Pef(double)
+        return placementsPerSecond == -1.0 ? "Waiting..." : String.format("%.2f blocks / h", placementsPerSecond * 3600.0);
     }
 
-    public static String formatDistancePerHour(int distance) {
-        if (distance < 1) return "Waiting...";
-        return String.format("%.2f blocks / h",
-            (float) calcRate(distance, HighwayState.getInstance().getTicksActive()) * 3600.0f);
+    public static String formatDistancePerSecond(int distanceTravelled) { // was: rKbT3Ifwo(int)
+        return distanceTravelled < 1 ? "Waiting..."
+            : String.format("%.2f blocks / s", (float) ratePerSecond(distanceTravelled, HighwayState.getInstance().getTicksActive()));
     }
 
-    public static String formatETABlocksPerSecond(double bps) {
-        if (bps == -1.0) return "Waiting...";
-        return String.format("%.2f blocks / s", bps);
+    public static String formatDistancePerHour(int distanceTravelled) { // was: r7hOYIKN2(int)
+        return distanceTravelled < 1 ? "Waiting..."
+            : String.format("%.2f blocks / h", (float) ratePerSecond(distanceTravelled, HighwayState.getInstance().getTicksActive()) * 3600.0F);
     }
 
-    /** Format how long until current obsidian supply runs out, as HH:MM:SS. */
-    public static String formatObsidianETA() {
+    public static String formatBreakingPerSecond(double breakingPerSecond) { // was: psJq59YIbp3Z(double)
+        return breakingPerSecond == -1.0 ? "Waiting..." : String.format("%.2f blocks / s", breakingPerSecond);
+    }
+
+    /** Mining-based ETA as H:MM:SS. */
+    public static String formatMiningEta() { // was: r7hOYIKN2()
         if (getBlocksPlacedPerSecond() == -1.0) return "Waiting...";
-        long secs  = (long) ((double) countObsidianBlocks() / getBlocksPlacedPerSecond());
-        return String.format("%d:%02d:%02d", secs / 3600, secs % 3600 / 60, secs % 60);
+        long timeLeft = (long) (getAvailableObsidian() / getBlocksPlacedPerSecond());
+        return clock(timeLeft);
     }
 
-    /** Format ETA until the next multiple of {@code interval} blocks, as HH:MM:SS. */
-    public static String formatCheckpointETA(int interval) {
+    /** Section-based ETA as H:MM:SS. */
+    public static String formatSectionEta(int sectionSize) { // was: oZHMlTL(int)
         if (getBlocksPlacedPerSecond() == -1.0) return "Waiting...";
-        long secs = (long) ((double) getDistanceToNextMultiple(interval)
-            / calcRate(getDistanceToCheckpoint(), HighwayState.getInstance().getTicksActive()));
-        return String.format("%d:%02d:%02d", secs / 3600, secs % 3600 / 60, secs % 60);
+        long timeLeft = (long) (getBlocksLeftInSection(sectionSize)
+            / ratePerSecond(getDistanceTravelled(), HighwayState.getInstance().getTicksActive()));
+        return clock(timeLeft);
     }
 
-    /** Format a tick count as HH:MM:SS (20 ticks = 1 second). */
-    public static String formatTicksAsTime(long ticks) {
+    /** Formats a tick count as an H:MM:SS clock (-1 = calculating, -2 = waiting). */
+    public static String formatTicksAsClock(long ticks) { // was: FvaNWO(long)
         if (ticks == -1L) return "Calculating...";
         if (ticks == -2L) return "Waiting...";
-        long secs = ticks / 20L;
-        return String.format("%d:%02d:%02d", secs / 3600, secs % 3600 / 60, secs % 60);
+        return clock(ticks / 20L);
+    }
+
+    private static String clock(long totalSeconds) {
+        long hours = totalSeconds / 3600L;
+        long minutes = totalSeconds % 3600L / 60L;
+        long seconds = totalSeconds % 60L;
+        return String.format("%d:%02d:%02d", hours, minutes, seconds);
     }
 }

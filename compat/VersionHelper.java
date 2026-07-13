@@ -1,80 +1,102 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// Interface and members were already readable.
 package musheor.compat;
 
 import com.google.gson.Gson;
 import com.mojang.brigadier.context.CommandContext;
-import java.io.File;
+import java.lang.reflect.Method;
 import java.util.UUID;
 import meteordevelopment.meteorclient.mixin.ContainerComponentAccessor;
-import net.minecraft.SkinTextures;
-import net.minecraft.InteractionHand;
-import net.minecraft.Entity;
-import net.minecraft.ItemStack;
-import net.minecraft.DefaultedList;
-import net.minecraft.Vec3d;
-import net.minecraft.NbtCompound;
-import net.minecraft.NbtList;
-import net.minecraft.Identifier;
-import net.minecraft.SoundEvent;
-import net.minecraft.PlayerListEntry;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.PlayerListEntry;
+import net.minecraft.client.texture.NativeImage;
+import net.minecraft.collection.DefaultedList;
+import net.minecraft.entity.Entity;
+import net.minecraft.item.ItemStack;
+import net.minecraft.nbt.NbtCompound;
+import net.minecraft.nbt.NbtList;
+import net.minecraft.sound.SoundEvent;
+import net.minecraft.util.Hand;
+import net.minecraft.util.Identifier;
+import net.minecraft.util.math.Vec3d;
 
+/**
+ * Version-abstraction layer for Minecraft APIs whose signatures shift between game versions
+ * (NBT access, sounds, skin textures, player pos, tab-list UUIDs, etc.). A single
+ * {@code VersionHelperImpl} is installed at startup; all addon code calls {@link #get()}.
+ */
 public interface VersionHelper {
-    public Gson getGson();
+    Gson getGson();
 
-    public static VersionHelper get() {
+    static VersionHelper get() {
         return VersionHelperHolder.INSTANCE;
     }
 
-    public Vec3d getPlayerPos();
+    Vec3d getPlayerPos();
 
-    public static void setInstance(VersionHelper versionHelper) {
-        VersionHelperHolder.INSTANCE = versionHelper;
+    static void setInstance(VersionHelper instance) {
+        VersionHelperHolder.INSTANCE = instance;
     }
 
-    public NbtCompound getCompound(NbtCompound var1, String var2);
+    NbtCompound getCompound(NbtCompound tag, String key);
 
-    public NbtList getList(NbtCompound var1, String var2, int var3);
+    NbtList getList(NbtCompound tag, String key, int type);
 
-    public String getString(NbtCompound var1, String var2);
+    String getString(NbtCompound tag, String key);
 
-    public int getInt(NbtCompound var1, String var2, int var3);
+    int getInt(NbtCompound tag, String key, int fallback);
 
-    public boolean hasControlDown();
+    boolean hasControlDown();
 
-    default public boolean supportsHudButtons() {
+    default boolean supportsHudButtons() {
         return true;
     }
 
-    public void sendCommand(String var1);
+    void sendCommand(String command);
 
-    public boolean isPickaxe(ItemStack var1);
+    boolean isPickaxe(ItemStack stack);
 
-    public boolean isTool(ItemStack var1);
+    boolean isTool(ItemStack stack);
 
-    public void playSoundPlayer(SoundEvent var1);
+    void playSoundPlayer(SoundEvent sound);
 
-    public DefaultedList<ItemStack> getStacks(ContainerComponentAccessor var1);
+    DefaultedList<ItemStack> getStacks(ContainerComponentAccessor accessor);
 
-    public String getName(CommandContext<?> var1);
+    String getName(CommandContext<?> context);
 
-    public UUID getUUID(PlayerListEntry var1);
+    UUID getUUID(PlayerListEntry entry);
 
-    public Object getSchematicFromFile(File var1, String var2);
+    boolean onSameServer(String playerName);
 
-    public boolean onSameServer(String var1);
+    void syncInventory();
 
-    public void syncInventory();
+    void interactEntityAt(Entity entity, Hand hand);
 
-    public void interactEntityAt(Entity var1, InteractionHand var2);
+    void registerSkinTexture(NativeImage image, String name, Identifier id);
 
-    public void registerSkinTexture(SkinTextures var1, String var2, Identifier var3);
+    void drawSkinTexture(Identifier id, float x, float y, float width, float height);
 
-    public void drawSkinTexture(Identifier var1, float var2, float var3, float var4, float var5);
+    void renderColorRenderer();
 
-    public void renderColorRenderer();
+    /** Best-effort read of the render camera position (reflected across version accessor names), or the player pos. */
+    default Vec3d getCameraPos() {
+        try {
+            Object cam = MinecraftClient.getInstance().getEntityRenderDispatcher().camera;
+            if (cam == null) return Vec3d.ZERO;
+            for (String name : new String[]{"getPos", "getPosition"}) {
+                try {
+                    Method m = cam.getClass().getMethod(name);
+                    if (m.invoke(cam) instanceof Vec3d v) return v;
+                } catch (NoSuchMethodException ignored) {
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        MinecraftClient mc = MinecraftClient.getInstance();
+        return mc.player != null ? new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ()) : Vec3d.ZERO;
+    }
 
-    public static class VersionHelperHolder {
+    class VersionHelperHolder {
         static VersionHelper INSTANCE;
     }
 }
-

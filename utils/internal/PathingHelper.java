@@ -1,4 +1,5 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// (source class was obfuscated as obf.NKyC2E)
 package musheor.utils.internal;
 
 import baritone.api.BaritoneAPI;
@@ -6,68 +7,52 @@ import baritone.api.pathing.goals.Goal;
 import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.pathing.goals.GoalNear;
 import baritone.api.pathing.goals.GoalXZ;
-import net.minecraft.util.math.BlockPos;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.util.math.BlockPos;
 
-/** Thin wrapper around the Baritone API for common pathing operations. */
+/** Thin wrapper around the Baritone API for the highway/collection modules. */
 public class PathingHelper {
-    private static final MinecraftClient mc = MinecraftClient.getInstance(); // was: ypiXcEk, method_1551
+    private static final MinecraftClient mc = MinecraftClient.getInstance(); // was: FvaNWO (field)
 
-    private PathingHelper() {}
-
-    /** Returns true if Baritone is currently navigating toward a goal. */
-    public static boolean isAlreadyPathing() { // was: LcPVM4w5KCoKSxGs
+    public static boolean isPathing() { // was: FvaNWO()
         return BaritoneAPI.getProvider().getPrimaryBaritone().getPathingBehavior().isPathing();
     }
 
-    /** Cancels all active Baritone pathing and goals. */
-    public static void stopPathing() { // was: xRVyNRV3cB7
+    public static boolean hasPath() { // was: Q90GLXQ0Pef()
+        return BaritoneAPI.getProvider().getPrimaryBaritone().getPathingBehavior().hasPath();
+    }
+
+    public static void cancelEverything() { // was: psJq59YIbp3Z()
         BaritoneAPI.getProvider().getPrimaryBaritone().getPathingBehavior().cancelEverything();
     }
 
-    /** Resumes Baritone pathing by executing the "resume" command. */
-    public static void startPathing() { // was: gaJr0zjHBLiO
-        BaritoneAPI.getProvider().getPrimaryBaritone().getCommandManager().execute("resume");
-    }
-
-    /** Sets a custom Goal and immediately starts pathing toward it. */
-    public static void setBaritoneGoal(Goal goal) { // was: jOdDDFXSeWl4(Goal)
+    public static void setGoal(Goal goal) { // was: FvaNWO(Goal)
         BaritoneAPI.getProvider().getPrimaryBaritone().getCustomGoalProcess().setGoalAndPath(goal);
     }
 
-    /** Sets a GoalNear and immediately starts pathing toward it. */
-    public static void setGoalNear(GoalNear goalNear) { // was: jOdDDFXSeWl4(GoalNear)
-        BaritoneAPI.getProvider().getPrimaryBaritone().getCustomGoalProcess().setGoalAndPath((Goal) goalNear);
+    public static void setGoal(GoalNear goal) { // was: FvaNWO(GoalNear)
+        BaritoneAPI.getProvider().getPrimaryBaritone().getCustomGoalProcess().setGoalAndPath(goal);
     }
 
-    /**
-     * Starts the Baritone elytra process toward (x, z) if it is not already active.
-     * Returns true if pathing was started, false if it was already running.
-     */
-    public static boolean startElytraPath(int x, int z) { // was: UgB10d(int,int)
+    /** Starts elytra pathing toward an XZ target; returns false if already elytra-pathing. */
+    public static boolean elytraTo(int x, int z) { // was: FvaNWO(int,int)
         if (!BaritoneAPI.getProvider().getPrimaryBaritone().getElytraProcess().isActive()) {
-            BaritoneAPI.getProvider().getPrimaryBaritone().getElytraProcess().pathTo((Goal) new GoalXZ(x, z));
+            BaritoneAPI.getProvider().getPrimaryBaritone().getElytraProcess().pathTo(new GoalXZ(x, z));
             return true;
         }
         return false;
     }
 
-    /** Wraps a BlockPos in a GoalBlock and starts pathing to it. */
-    public static void setGoal(BlockPos pos) { // was: l92qSNnpKrYO(BlockPos)
-        PathingHelper.setBaritoneGoal((Goal) new GoalBlock(pos));
+    public static void gotoBlock(BlockPos pos) { // was: FvaNWO(BlockPos)
+        setGoal(new GoalBlock(pos));
     }
 
-    /** Executes an arbitrary Baritone command string (e.g. "resume", "cancel"). */
-    public static void executeBaritoneCommand(String command) { // was: J9PiTNS(String)
+    public static void runCommand(String command) { // was: FvaNWO(String)
         BaritoneAPI.getProvider().getPrimaryBaritone().getCommandManager().execute(command);
     }
 
-    /** Paths to a BlockPos using Baritone's "goto x y z" command. */
-    public static void pathToPos(BlockPos pos) { // was: S7TLszvzENsW7(BlockPos)
-        PathingHelper.executeBaritoneCommand(
-            String.format("goto %d %d %d",
-                pos.getX(),   // getX
-                pos.getY(),   // getY
-                pos.getZ())); // getZ
+    /** Issues a Baritone "goto x y z" command to the given position. */
+    public static void gotoCommand(BlockPos itemPos) { // was: Q90GLXQ0Pef(BlockPos)
+        runCommand(String.format("goto %d %d %d", itemPos.getX(), itemPos.getY(), itemPos.getZ()));
     }
 }

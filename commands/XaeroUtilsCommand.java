@@ -1,11 +1,12 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// (source class was obfuscated as obf.w4hkT)
 package musheor.commands;
 
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import meteordevelopment.meteorclient.commands.Command;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import musheor.compat.XearoHelper;
-import net.minecraft.GuiGraphics;  // CommandSource
+import net.minecraft.server.command.ServerCommandSource;
 
 /**
  * .xaero deleteAllTempWaypoints
@@ -18,7 +19,7 @@ public class XaeroUtilsCommand extends Command {
     }
 
     @Override
-    public void build(LiteralArgumentBuilder<GuiGraphics> builder) {
+    public void build(LiteralArgumentBuilder<ServerCommandSource> builder) {
         builder.then(XaeroUtilsCommand.literal("deleteAllTempWaypoints")
             .executes(ctx -> {
                 XearoHelper.get().deleteAllTempWaypoints();

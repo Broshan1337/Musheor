@@ -1,4 +1,5 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// Class name was already readable; internal members were obfuscated.
 package musheor.modules.features;
 
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
@@ -13,126 +14,100 @@ import meteordevelopment.orbit.EventHandler;
 import musheor.musheor;
 import musheor.utils.RenderUtils;
 import musheor.utils.WorldUtils;
-import net.minecraft.util.Hand;
 import net.minecraft.block.Block;
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.item.BlockItem;
-import net.minecraft.item.Item;
-import net.minecraft.item.ItemStack;
 import net.minecraft.item.SpawnEggItem;
+import net.minecraft.util.Hand;
+import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
-import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.hit.BlockHitResult;
 
-public class AirPlace
-extends Module {
-    private final SettingGroup sgGeneral;
-    private static final MinecraftClient mc = MinecraftClient.getInstance();
-    private final Setting<Boolean> render;
-    private final Setting<Boolean> customRange;
-    private final Setting<Double> range;
-    private BlockPos targetPos;
-    private boolean wasUseHeld;
-    private int ticksHeld;
+/**
+ * "kek-place" — a Grim-bypass air-placer. While the use key is held and a block/spawn-egg
+ * item is in hand, it raycasts for a replaceable position (or the face adjacent to a hit
+ * block) and places there via the off-hand swap trick, then sets the block locally.
+ */
+public class AirPlace extends Module {
+    private final SettingGroup sgGeneral = this.settings.getDefaultGroup();  // was: FvaNWO
+    private static final MinecraftClient mc = MinecraftClient.getInstance(); // was: Q90GLXQ0Pef
+
+    private final Setting<Boolean> render = sgGeneral.add(new BoolSetting.Builder() // was: psJq59YIbp3Z
+        .name("render").description("Renders an overlay where the block will be placed.").defaultValue(true).build());
+    private final Setting<Boolean> customRange = sgGeneral.add(new BoolSetting.Builder() // was: SOYyh5IPg26f7F
+        .name("custom-range").description("Use custom range for air place.").defaultValue(false).build());
+    private final Setting<Double> range = sgGeneral.add(new DoubleSetting.Builder() // was: rKbT3Ifwo
+        .name("range").description("Custom range to place at.").visible(customRange::get).defaultValue(4.5).min(0.0).sliderMax(6.0).build());
+
+    private BlockPos targetPos = null; // was: r7hOYIKN2
+    private boolean wasPressed = false; // was: oZHMlTL
+    private int holdTicks = 0;          // was: xQr5FhbwpQPWgIQ
 
     public AirPlace() {
         super(musheor.MAIN, "kek-place", "Bypasses grim to place blocks mid-air");
-        this.sgGeneral = this.settings.getDefaultGroup();
-        this.render = this.sgGeneral.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("render")).description("Renders an overlay where the block will be placed.")).defaultValue((Object)true)).build());
-        this.customRange = this.sgGeneral.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("custom-range")).description("Use custom range for air place.")).defaultValue((Object)false)).build());
-        this.range = this.sgGeneral.add((Setting)((DoubleSetting.Builder)((DoubleSetting.Builder)((DoubleSetting.Builder)new DoubleSetting.Builder().name("range")).description("Custom range to place at.")).visible(() -> this.customRange.get())).defaultValue(4.5).min(0.0).sliderMax(6.0).build());
-        this.targetPos = null;
-        this.wasUseHeld = false;
-        this.ticksHeld = 0;
     }
 
+    @Override
     public void onActivate() {
-        this.wasUseHeld = false;
-        this.ticksHeld = 0;
+        this.wasPressed = false;
+        this.holdTicks = 0;
         this.targetPos = null;
     }
 
     @EventHandler
-    private void onTick(TickEvent.Post post) {
-        if (AirPlace.mc.player == null || AirPlace.mc.world == null) {
-            return;
-        }
-        this.targetPos = this.getAirPlaceTarget();
-        boolean bl = AirPlace.mc.options.useKey.isPressed();
-        boolean bl2 = bl && !this.wasUseHeld;
-        this.wasUseHeld = bl;
-        if (!bl) {
-            this.ticksHeld = 0;
-            return;
-        }
-        if (this.targetPos == null) {
-            return;
-        }
-        if (!(AirPlace.mc.player.getMainHandStack().getItem() instanceof BlockItem) && !(AirPlace.mc.player.getMainHandStack().getItem() instanceof SpawnEggItem)) {
-            return;
-        }
-        if (!BlockUtils.canPlace((BlockPos)this.targetPos, (boolean)true)) {
-            return;
-        }
-        if (bl2) {
-            this.ticksHeld = 0;
-            this.placeBlock(this.targetPos);
-        } else {
-            ++this.ticksHeld;
-            if (this.ticksHeld >= 4) {
-                this.ticksHeld = 0;
+    private void onTick(TickEvent.Post event) { // was: FvaNWO(Post)
+        if (mc.player == null || mc.world == null) return;
+        this.targetPos = this.findAirPlaceTarget();
+        boolean pressed = mc.options.useKey.isPressed();
+        boolean justPressed = pressed && !this.wasPressed;
+        this.wasPressed = pressed;
+        if (!pressed) {
+            this.holdTicks = 0;
+        } else if (this.targetPos != null
+            && (mc.player.getMainHandStack().getItem() instanceof BlockItem || mc.player.getMainHandStack().getItem() instanceof SpawnEggItem)
+            && BlockUtils.canPlace(this.targetPos, true)) {
+            if (justPressed) {
+                this.holdTicks = 0;
+                this.placeBlock(this.targetPos);
+            } else if (++this.holdTicks >= 4) {
+                this.holdTicks = 0;
                 this.placeBlock(this.targetPos);
             }
         }
     }
 
-    private BlockPos getAirPlaceTarget() {
-        double d;
-        if (AirPlace.mc.player == null || AirPlace.mc.world == null) {
-            return null;
+    /** The replaceable position under the crosshair (or the face adjacent to a hit block), or null. */
+    private BlockPos findAirPlaceTarget() { // was: FvaNWO()
+        if (mc.player == null || mc.world == null) return null;
+        double r = this.customRange.get() ? this.range.get() : mc.player.getBlockInteractionRange();
+        if (mc.getCameraEntity() == null) return null;
+        if (mc.getCameraEntity().raycast(r, 0.0F, false) instanceof BlockHitResult bhr) {
+            BlockPos hitPos = bhr.getBlockPos();
+            if (mc.world.getBlockState(hitPos).isReplaceable()) return hitPos;
+            BlockPos adjacent = hitPos.offset(bhr.getSide());
+            return mc.world.getBlockState(adjacent).isReplaceable() ? adjacent : null;
         }
-        double d2 = d = (Boolean)this.customRange.get() != false ? ((Double)this.range.get()).doubleValue() : AirPlace.mc.player.getBlockInteractionRange();
-        if (mc.getCameraEntity() == null) {
-            return null;
-        }
-        HitResult hitResult = mc.getCameraEntity().raycast(d, 0.0f, false);
-        if (!(hitResult instanceof BlockHitResult)) {
-            return null;
-        }
-        BlockHitResult blockHit = (BlockHitResult)hitResult;
-        BlockPos BlockPos2 = blockHit.getBlockPos();
-        if (AirPlace.mc.world.getBlockState(BlockPos2).isReplaceable()) {
-            return BlockPos2;
-        }
-        BlockPos BlockPos3 = BlockPos2.offset(blockHit.getSide());
-        return AirPlace.mc.world.getBlockState(BlockPos3).isReplaceable() ? BlockPos3 : null;
+        return null;
     }
 
-    private void placeBlock(BlockPos BlockPos2) {
-        BlockHitResult blockHit = new BlockHitResult(Vec3d.ofCenter(BlockPos2), Direction.DOWN, BlockPos2, false);
-        WorldUtils.swapCarriedItems();
-        WorldUtils.sendPlacePacket(Hand.OFF_HAND, blockHit);
-        WorldUtils.swapCarriedItems();
-        Item ItemStack2 = AirPlace.mc.player.getMainHandStack().getItem(); // was: ItemStack ItemStack2 (CFR type error)
-        if (ItemStack2 instanceof BlockItem) {
-            BlockItem blockItem2 = (BlockItem)ItemStack2;
-            AirPlace.mc.world.setBlockState(BlockPos2, blockItem2.getBlock().getDefaultState(), 3);
+    /** Places the held block at {@code pos} via the off-hand swap trick and mirrors it locally. */
+    private void placeBlock(BlockPos pos) { // was: FvaNWO(BlockPos)
+        BlockHitResult hit = new BlockHitResult(Vec3d.ofCenter(pos), Direction.DOWN, pos, false);
+        WorldUtils.swapHands();
+        WorldUtils.sendInteract(Hand.OFF_HAND, hit);
+        WorldUtils.swapHands();
+        if (mc.player.getMainHandStack().getItem() instanceof BlockItem bi) {
+            mc.world.setBlockState(pos, bi.getBlock().getDefaultState(), 3);
         }
     }
 
     @EventHandler
-    private void onRender(Render3DEvent render3DEvent) {
-        if (AirPlace.mc.player == null || AirPlace.mc.world == null || !((Boolean)this.render.get()).booleanValue() || this.targetPos == null) {
-            return;
+    private void onRender(Render3DEvent event) { // was: FvaNWO(Render3DEvent)
+        if (mc.player == null || mc.world == null || !this.render.get() || this.targetPos == null) return;
+        if ((mc.player.getMainHandStack().getItem() instanceof BlockItem || mc.player.getMainHandStack().getItem() instanceof SpawnEggItem)
+            && mc.world.getBlockState(this.targetPos).isReplaceable()) {
+            RenderUtils.render(event, this.targetPos, Block.getBlockFromItem(mc.player.getMainHandStack().getItem()));
         }
-        if (!(AirPlace.mc.player.getMainHandStack().getItem() instanceof BlockItem) && !(AirPlace.mc.player.getMainHandStack().getItem() instanceof SpawnEggItem)) {
-            return;
-        }
-        if (!AirPlace.mc.world.getBlockState(this.targetPos).isReplaceable()) {
-            return;
-        }
-        RenderUtils.jOdDDFXSeWl4(render3DEvent, this.targetPos, Block.getBlockFromItem(AirPlace.mc.player.getMainHandStack().getItem())); // was: (ItemStack) cast (CFR error); RenderUtils.jOdDDFXSeWl4 pending deobfuscation
     }
 }

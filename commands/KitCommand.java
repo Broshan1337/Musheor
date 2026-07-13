@@ -1,4 +1,5 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// (source class was obfuscated as obf.VGn8YrSOy)
 package musheor.commands;
 
 import com.mojang.brigadier.arguments.ArgumentType;
@@ -10,7 +11,7 @@ import meteordevelopment.meteorclient.commands.Command;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import musheor.modules.automation.ReKit;
-import net.minecraft.GuiGraphics;  // CommandSource
+import net.minecraft.server.command.ServerCommandSource;
 
 /**
  * .kit create|load|delete|list [name]
@@ -27,13 +28,13 @@ public class KitCommand extends Command {
     }
 
     @Override
-    public void build(LiteralArgumentBuilder<GuiGraphics> builder) {
+    public void build(LiteralArgumentBuilder<ServerCommandSource> builder) {
         // .kit create <name>
         builder.then(KitCommand.literal("create")
             .then(KitCommand.argument("name", (ArgumentType) StringArgumentType.word())
                 .executes(ctx -> {
                     String name = StringArgumentType.getString((CommandContext) ctx, "name");
-                    ((ReKit) Modules.get().get(ReKit.class)).saveKit(name); // was: TAdu5cndwWu3A1(String)
+                    ((ReKit) Modules.get().get(ReKit.class)).saveKit(name); // was: FvaNWO(String)
                     return 1;
                 })));
 
@@ -43,13 +44,13 @@ public class KitCommand extends Command {
                 .executes(ctx -> {
                     String name = StringArgumentType.getString((CommandContext) ctx, "name");
                     ReKit reKit = (ReKit) Modules.get().get(ReKit.class);
-                    if (!reKit.hasKit(name)) { // was: KP44bk(String)
-                        ChatUtils.error("Kit '\u00a7b" + name + "\u00a7c' not found. Use \u00a7b.kit create\u00a7c to save one.", new Object[0]);
+                    if (!reKit.hasKit(name)) { // was: rKbT3Ifwo(String)
+                        ChatUtils.error("Kit '§b" + name + "§c' not found. Use §b.kit create§c to save one.", new Object[0]);
                         return 1;
                     }
-                    reKit.loadout.set(name);
-                    reKit.applyKit(name); // was: vgrtgn5(String)
-                    ChatUtils.info("Active kit set to '\u00a7b" + name + "\u00a7r'.", new Object[0]);
+                    reKit.loadout.set(name);       // was: psJq59YIbp3Z
+                    reKit.loadKit(name);           // was: Q90GLXQ0Pef(String) — loads from disk; the sort runs on next container open
+                    ChatUtils.info("Active kit set to '§b" + name + "§r'.", new Object[0]);
                     return 1;
                 })));
 
@@ -58,18 +59,18 @@ public class KitCommand extends Command {
             .then(KitCommand.argument("name", (ArgumentType) StringArgumentType.word())
                 .executes(ctx -> {
                     String name = StringArgumentType.getString((CommandContext) ctx, "name");
-                    ((ReKit) Modules.get().get(ReKit.class)).deleteKit(name); // was: UgB10d(String)
+                    ((ReKit) Modules.get().get(ReKit.class)).deleteKit(name); // was: SOYyh5IPg26f7F(String)
                     return 1;
                 })));
 
         // .kit list
         builder.then(KitCommand.literal("list")
             .executes(ctx -> {
-                List<String> kits = ((ReKit) Modules.get().get(ReKit.class)).listKits(); // was: vV6cbpE7KWBI
+                List<String> kits = ((ReKit) Modules.get().get(ReKit.class)).listKits(); // was: Q90GLXQ0Pef()
                 if (kits.isEmpty()) {
                     ChatUtils.info("No kits saved.", new Object[0]);
                 } else {
-                    ChatUtils.info("Saved kits: \u00a7b" + String.join("\u00a7r, \u00a7b", kits) + "\u00a7r", new Object[0]);
+                    ChatUtils.info("Saved kits: §b" + String.join("§r, §b", kits) + "§r", new Object[0]);
                 }
                 return 1;
             }));

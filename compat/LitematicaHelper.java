@@ -1,45 +1,57 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// Interface and members were already readable.
 package musheor.compat;
 
 import java.util.List;
 import java.util.Map;
-import net.minecraft.Block;
-import net.minecraft.BlockPos;
-import net.minecraft.BlockState;
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
+import net.minecraft.util.math.BlockPos;
 
+/**
+ * Optional-dependency bridge to Litematica. A {@code LitematicaHelperImpl} is installed
+ * (via reflection) only when Litematica is present; {@link #isLoaded()} gates every call.
+ * Exposes schematic loading, per-block target queries, remaining-material counts, and the
+ * "wrong block" positions used by {@link musheor.modules.automation.Printer} / KekNuker.
+ */
 public interface LitematicaHelper {
-    public boolean ensureSchematicAt(String var1, BlockPos var2);
+    boolean ensureSchematicAt(String name, BlockPos pos);
 
-    public void clearAllPlacements();
+    void clearAllPlacements();
 
-    public boolean verifySchematic();
+    boolean verifySchematic();
 
-    public Map<BlockPos, BlockState> getBlocksInBox(BlockPos var1, BlockPos var2, boolean var3, List<Block> var4, int var5);
+    Map<BlockPos, BlockState> getBlocksInBox(BlockPos min, BlockPos max, boolean onlyAir, List<Block> ignored, int limit);
 
-    public Map<Block, Integer> getMaterialCounts(List<Block> var1);
+    Map<Block, Integer> getMaterialCounts(List<Block> ignored);
 
-    public BlockPos findClosestUnplacedBlock(BlockPos var1, int var2, boolean var3, List<Block> var4);
+    Map<Block, Integer> getRemainingMaterialCounts(List<Block> ignored, boolean onlyAir);
 
-    public boolean isPositionInRenderLayer(BlockPos var1);
+    BlockPos findClosestUnplacedBlock(BlockPos origin, int range, boolean onlyAir, List<Block> ignored);
 
-    public List<BlockPos> getWrongSchematicBlocks(double var1, boolean var3);
+    boolean isPositionInRenderLayer(BlockPos pos);
 
-    public List<BlockPos[]> getSchematicRegionBounds();
+    List<BlockPos> getWrongSchematicBlocks(double range, boolean ignoreAir);
 
-    public static boolean isLoaded() {
+    List<BlockPos> getWrongBlocksInBox(BlockPos min, BlockPos max, boolean includeAir, int limit);
+
+    boolean hasRemainingPositions(Block block, boolean onlyAir, List<Block> ignored);
+
+    List<BlockPos[]> getSchematicRegionBounds();
+
+    static boolean isLoaded() {
         return LitematicaHelperHolder.INSTANCE != null;
     }
 
-    public static LitematicaHelper get() {
+    static LitematicaHelper get() {
         return LitematicaHelperHolder.INSTANCE;
     }
 
-    public static void setInstance(LitematicaHelper litematicaHelper) {
-        LitematicaHelperHolder.INSTANCE = litematicaHelper;
+    static void setInstance(LitematicaHelper instance) {
+        LitematicaHelperHolder.INSTANCE = instance;
     }
 
-    public static class LitematicaHelperHolder {
+    class LitematicaHelperHolder {
         static LitematicaHelper INSTANCE = null;
     }
 }
-

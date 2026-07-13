@@ -1,4 +1,5 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// Class name and members were already readable.
 package musheor.mixin;
 
 import java.util.ArrayList;
@@ -13,19 +14,17 @@ import xaero.map.gui.IRightClickableElement;
 import xaero.map.gui.MapTileSelection;
 import xaero.map.gui.dropdown.rightclick.RightClickOption;
 
-@Mixin(value={GuiMap.class}, remap=false)
-public abstract class MixinXearoGuiMap
-implements IRightClickableElement {
+/** Adds Musheor's custom entries to Xaero's world-map right-click menu (via {@link XearoMapHooks}). */
+@Mixin(value = GuiMap.class, remap = false)
+public abstract class MixinXearoGuiMap implements IRightClickableElement {
     @Shadow
     private MapTileSelection mapTileSelection;
 
-    @Inject(method={"getRightClickOptions"}, at={@At(value="RETURN")})
-    private void musheor$addOptions(CallbackInfoReturnable<ArrayList<RightClickOption>> callbackInfoReturnable) {
-        MapTileSelection mapTileSelection = this.mapTileSelection;
-        if (mapTileSelection == null) {
-            return;
+    @Inject(method = "getRightClickOptions", at = @At("RETURN"))
+    private void musheor$addOptions(CallbackInfoReturnable<ArrayList<RightClickOption>> cir) {
+        MapTileSelection sel = this.mapTileSelection;
+        if (sel != null) {
+            XearoMapHooks.apply(cir.getReturnValue(), this, sel);
         }
-        XearoMapHooks.apply((ArrayList)callbackInfoReturnable.getReturnValue(), this, mapTileSelection);
     }
 }
-

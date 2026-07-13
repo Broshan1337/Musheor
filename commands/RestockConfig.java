@@ -1,4 +1,5 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// (source class was obfuscated as obf.UkMm7uisd; nested listeners were obf.UkMm7uisd$FDb5 / $aY0a71o)
 package musheor.commands;
 
 import com.mojang.brigadier.arguments.ArgumentType;
@@ -20,7 +21,6 @@ import meteordevelopment.orbit.EventHandler;
 import musheor.compat.VersionHelper;
 import musheor.utils.WorldUtils;
 import musheor.utils.system.MusheorSystem;
-import net.minecraft.client.MinecraftClient;
 import net.minecraft.command.CommandRegistryAccess;
 import net.minecraft.command.argument.ItemStackArgumentType;
 import net.minecraft.item.Item;
@@ -41,11 +41,10 @@ import net.minecraft.util.math.BlockPos;
  * .rc [auto | add <item> | remove <item> | list | clear]
  *
  * Configures which containers (chests, shulkers, etc.) each item should be
- * restocked from. Used by InventoryManager's restocking logic.
+ * restocked from. Used by the InventoryManager restocking logic.
  *
  * Modes:
- *   auto          — opens "auto config" mode: walk up to containers and open
- *                   them to automatically register their contents
+ *   auto          — "auto config" mode: open containers to auto-register contents
  *   add <item>    — manually enter "add container" mode for a specific item
  *   remove <item> — removes all configured containers for the given item
  *   list          — lists all configured item→container mappings with distances
@@ -55,16 +54,16 @@ import net.minecraft.util.math.BlockPos;
  */
 public class RestockConfig extends Command {
     /** item → list of container BlockPos mappings */
-    static final Map<Item, List<BlockPos>> containerMap = new HashMap<Item, List<BlockPos>>(); // was: Gt56Sj4a6BWhgB
+    private static final Map<Item, List<BlockPos>> containerMap = new HashMap<Item, List<BlockPos>>(); // was: FvaNWO (Map field)
 
     // --- State for "add" mode ---
-    static boolean addModeActive  = false;  // was: TAdu5cndwWu3A1
-    static Item addModeItem       = null;   // was: vgrtgn5
+    private static boolean addModeActive = false;  // was: Q90GLXQ0Pef
+    private static Item addModeItem      = null;   // was: psJq59YIbp3Z
 
     // --- State for "auto" mode ---
-    static boolean autoModeActive = false;  // was: VYEwzRq
-    static BlockPos lastClickedPos = null;  // was: UgB10d
-    static int autoScanDelay      = -1;    // was: KP44bk
+    private static boolean autoModeActive = false; // was: SOYyh5IPg26f7F
+    private static BlockPos lastClickedPos = null;  // was: rKbT3Ifwo
+    private static int autoScanDelay       = -1;   // was: r7hOYIKN2
 
     public RestockConfig() {
         super("rc", "Configure restocking container locations for items.", new String[]{"rc"});
@@ -85,7 +84,7 @@ public class RestockConfig extends Command {
     }
 
     /** If in auto mode, exits it; otherwise shows usage. */
-    private int handleNoArgs(CommandContext<ServerCommandSource> ctx) { // was: VYEwzRq(CommandContext)
+    private int handleNoArgs(CommandContext<ServerCommandSource> ctx) { // was: FvaNWO(CommandContext)
         if (!autoModeActive) {
             this.info("Usage: .rc auto | add <item> | remove <item> | list | clear", new Object[0]);
             return 1;
@@ -101,13 +100,13 @@ public class RestockConfig extends Command {
     }
 
     /** Enters auto-config mode: open containers to register them automatically. */
-    private int handleAuto(CommandContext<ServerCommandSource> ctx) { // was: UgB10d(CommandContext)
+    private int handleAuto(CommandContext<ServerCommandSource> ctx) { // was: Q90GLXQ0Pef(CommandContext)
         autoModeActive = true;
         lastClickedPos = null;
         autoScanDelay  = -1;
         this.info("Auto config mode enabled", new Object[0]);
-        this.info("\u00a77Open containers to automatically register their contents", new Object[0]);
-        this.info("\u00a77Type .rc to exit", new Object[0]);
+        this.info("§7Open containers to automatically register their contents", new Object[0]);
+        this.info("§7Type .rc to exit", new Object[0]);
         if (!MeteorClient.EVENT_BUS.isListening(AutoConfigListener.class)) {
             MeteorClient.EVENT_BUS.subscribe((Object) AutoConfigListener.INSTANCE);
         }
@@ -115,7 +114,7 @@ public class RestockConfig extends Command {
     }
 
     /** Enters item-specific "add container" mode for the given item. */
-    private int handleAdd(CommandContext<ServerCommandSource> ctx) { // was: KP44bk(CommandContext)
+    private int handleAdd(CommandContext<ServerCommandSource> ctx) { // was: psJq59YIbp3Z(CommandContext)
         Item item = ItemStackArgumentType.getItemStackArgument(ctx, "item").getItem();
         if (item == null || item == Items.AIR) {
             this.error("Invalid item: %s", new Object[]{item});
@@ -123,9 +122,9 @@ public class RestockConfig extends Command {
         }
         addModeActive = true;
         addModeItem   = item;
-        this.info("Restocking config mode enabled for \u00a7b%s", new Object[]{getItemName(item)});
-        this.info("\u00a77Right-click containers to add them", new Object[0]);
-        this.info("\u00a77Esc to exit config mode", new Object[0]);
+        this.info("Restocking config mode enabled for §b%s", new Object[]{getItemName(item)});
+        this.info("§7Right-click containers to add them", new Object[0]);
+        this.info("§7Esc to exit config mode", new Object[0]);
         if (!MeteorClient.EVENT_BUS.isListening(RestockingConfigListener.class)) {
             MeteorClient.EVENT_BUS.subscribe((Object) RestockingConfigListener.INSTANCE);
         }
@@ -133,7 +132,7 @@ public class RestockConfig extends Command {
     }
 
     /** Clears all configured containers for all items. */
-    private int handleClear(CommandContext<ServerCommandSource> ctx) { // was: jWrhVf2psx(CommandContext)
+    private int handleClear(CommandContext<ServerCommandSource> ctx) { // was: SOYyh5IPg26f7F(CommandContext)
         int total = containerMap.values().stream().mapToInt(List::size).sum();
         containerMap.clear();
         saveConfig();
@@ -142,7 +141,7 @@ public class RestockConfig extends Command {
     }
 
     /** Lists all item→container mappings with block distances. */
-    private int handleList(CommandContext<ServerCommandSource> ctx) { // was: usJLOV0subXO3(CommandContext)
+    private int handleList(CommandContext<ServerCommandSource> ctx) { // was: rKbT3Ifwo(CommandContext)
         if (containerMap.isEmpty()) {
             this.info("No restocking containers configured", new Object[0]);
             return 1;
@@ -151,18 +150,18 @@ public class RestockConfig extends Command {
         for (Map.Entry<Item, List<BlockPos>> entry : containerMap.entrySet()) {
             Item item = entry.getKey();
             List<BlockPos> positions = entry.getValue();
-            this.info("\u00a7b%s\u00a7r (%d containers):", new Object[]{getItemName(item), positions.size()});
+            this.info("§b%s§r (%d containers):", new Object[]{getItemName(item), positions.size()});
             for (BlockPos pos : positions) {
                 this.info("  - %s, blocks away",
                     new Object[]{Math.ceil(WorldUtils.horizontalDistance(
-                        RestockConfig.mc.player.getBlockPos(), pos))});
+                        RestockConfig.mc.player.getBlockPos(), pos))}); // was: HFbqnT1FEh2q.FvaNWO
             }
         }
         return 1;
     }
 
     /** Removes all containers registered for the given item. */
-    private int handleRemove(CommandContext<ServerCommandSource> ctx) { // was: ZbTtF5KYyGL9YXed(CommandContext)
+    private int handleRemove(CommandContext<ServerCommandSource> ctx) { // was: r7hOYIKN2(CommandContext)
         Item item = ItemStackArgumentType.getItemStackArgument(ctx, "item").getItem();
         if (item == null || item == Items.AIR) {
             this.error("Invalid item: %s", new Object[]{item});
@@ -183,22 +182,22 @@ public class RestockConfig extends Command {
     // -------------------------------------------------------------------------
 
     /** Returns the display name of an item (strips "minecraft:" prefix). */
-    public static String getItemName(Item item) { // was: jOdDDFXSeWl4(Item)
+    public static String getItemName(Item item) { // was: FvaNWO(Item)
         return Registries.ITEM.getId(item).toString().replace("minecraft:", "");
     }
 
     /** Returns the list of container positions for the given item (empty list if none). */
-    public static List<BlockPos> getContainersFor(Item item) { // was: mp3zoXQFKUKYj5(Item)
-        return containerMap.getOrDefault(item, new ArrayList());
+    public static List<BlockPos> getContainersFor(Item item) { // was: Q90GLXQ0Pef(Item)
+        return containerMap.getOrDefault(item, new ArrayList<BlockPos>());
     }
 
     /** Returns true if the given item has at least one configured container. */
-    public static boolean hasContainers(Item item) { // was: Gt56Sj4a6BWhgB(Item)
+    public static boolean hasContainers(Item item) { // was: psJq59YIbp3Z(Item)
         return containerMap.containsKey(item) && !containerMap.get(item).isEmpty();
     }
 
     /** Triggers a Meteor NBT save so the config is persisted. */
-    static void saveConfig() { // was: jOdDDFXSeWl4() (no-arg)
+    private static void saveConfig() { // was: rKbT3Ifwo() (no-arg)
         ((MusheorSystem) Systems.get(MusheorSystem.class)).save();
     }
 
@@ -207,7 +206,7 @@ public class RestockConfig extends Command {
     // -------------------------------------------------------------------------
 
     /** Serialises the container map to an NbtCompound (item ID → list of packed BlockPos longs). */
-    public static NbtCompound toTag() {
+    public static NbtCompound toTag() { // was: FvaNWO() (NbtCompound)
         NbtCompound tag = new NbtCompound();
         for (Map.Entry<Item, List<BlockPos>> entry : containerMap.entrySet()) {
             String id = Registries.ITEM.getId(entry.getKey()).toString();
@@ -221,7 +220,7 @@ public class RestockConfig extends Command {
     }
 
     /** Deserialises the container map from an NbtCompound. */
-    public static void fromTag(NbtCompound tag) { // was: jOdDDFXSeWl4(NbtCompound)
+    public static void fromTag(NbtCompound tag) { // was: FvaNWO(NbtCompound)
         containerMap.clear();
         for (String key : tag.getKeys()) {
             Identifier id = Identifier.tryParse(key);
@@ -237,7 +236,7 @@ public class RestockConfig extends Command {
     }
 
     // -------------------------------------------------------------------------
-    // Event listener: auto-config mode
+    // Event listener: auto-config mode  (was: nested class UkMm7uisd$FDb5)
     // -------------------------------------------------------------------------
 
     /**
@@ -245,8 +244,8 @@ public class RestockConfig extends Command {
      * After a delay of 4 ticks (to let the server send the container contents),
      * scans the open screen handler for item types and registers the container.
      */
-    static class AutoConfigListener {
-        static final AutoConfigListener INSTANCE = new AutoConfigListener(); // was: jWrhVf2psx
+    private static class AutoConfigListener {
+        private static final AutoConfigListener INSTANCE = new AutoConfigListener(); // was: FvaNWO
 
         private AutoConfigListener() {}
 
@@ -289,19 +288,19 @@ public class RestockConfig extends Command {
             }
 
             if (items.isEmpty()) {
-                ChatUtils.info("Container at \u00a7b%d %d %d\u00a7r is empty, skipping",
+                ChatUtils.info("Container at §b%d %d %d§r is empty, skipping",
                     new Object[]{lastClickedPos.getX(), lastClickedPos.getY(), lastClickedPos.getZ()});
             } else {
                 BlockPos pos = lastClickedPos;
                 for (Item item : items) {
-                    List<BlockPos> list = containerMap.computeIfAbsent(item, k -> new ArrayList());
+                    List<BlockPos> list = containerMap.computeIfAbsent(item, k -> new ArrayList<BlockPos>());
                     if (!list.contains(pos)) list.add(pos);
                 }
                 saveConfig();
-                ChatUtils.info("Registered \u00a7b%d\u00a7r item(s) from container",
+                ChatUtils.info("Registered §b%d§r item(s) from container",
                     new Object[]{items.size(), pos.getX(), pos.getY(), pos.getZ()});
                 for (Item item : items) {
-                    ChatUtils.info("  - \u00a7b%s", new Object[]{getItemName(item)});
+                    ChatUtils.info("  - §b%s", new Object[]{getItemName(item)});
                 }
             }
             lastClickedPos = null;
@@ -309,7 +308,7 @@ public class RestockConfig extends Command {
     }
 
     // -------------------------------------------------------------------------
-    // Event listener: add-container mode (specific item)
+    // Event listener: add-container mode  (was: nested class UkMm7uisd$aY0a71o)
     // -------------------------------------------------------------------------
 
     /**
@@ -317,8 +316,8 @@ public class RestockConfig extends Command {
      * Right-clicking a container registers it for the configured item.
      * Pressing Esc (opening a null screen) exits the mode.
      */
-    static class RestockingConfigListener {
-        static final RestockingConfigListener INSTANCE = new RestockingConfigListener(); // was: usJLOV0subXO3
+    private static class RestockingConfigListener {
+        private static final RestockingConfigListener INSTANCE = new RestockingConfigListener(); // was: FvaNWO
 
         private RestockingConfigListener() {}
 
@@ -326,9 +325,9 @@ public class RestockConfig extends Command {
         private void onInteractBlock(InteractBlockEvent event) {
             if (!addModeActive || addModeItem == null) return;
             BlockPos pos = event.result.getBlockPos();
-            containerMap.computeIfAbsent(addModeItem, k -> new ArrayList()).add(pos);
+            containerMap.computeIfAbsent(addModeItem, k -> new ArrayList<BlockPos>()).add(pos);
             saveConfig();
-            ChatUtils.info("Added container for \u00a7b%s",
+            ChatUtils.info("Added container for §b%s",
                 new Object[]{Registries.ITEM.getId(addModeItem).toString()});
             event.cancel();
         }
@@ -341,12 +340,12 @@ public class RestockConfig extends Command {
             event.cancel();
         }
 
-        private void exitAddMode() { // was: vgrtgn5()
+        private void exitAddMode() { // was: FvaNWO() (no-arg)
             addModeActive = false;
             Item item = addModeItem;
             addModeItem = null;
-            int count = ((List<?>) containerMap.getOrDefault(item, new ArrayList())).size();
-            ChatUtils.info("Exited restocking config mode. Added \u00a7b%d\u00a7r containers for \u00a7b%s",
+            int count = containerMap.getOrDefault(item, new ArrayList<BlockPos>()).size();
+            ChatUtils.info("Exited restocking config mode. Added §b%d§r containers for §b%s",
                 new Object[]{count, getItemName(item)});
         }
     }

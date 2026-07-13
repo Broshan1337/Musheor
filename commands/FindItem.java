@@ -1,4 +1,5 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// (source class was obfuscated as obf.D0Jn)
 package musheor.commands;
 
 import com.mojang.brigadier.arguments.ArgumentType;
@@ -16,7 +17,7 @@ import net.minecraft.command.CommandRegistryAccess;
  * .find <item>
  *
  * Enables Baritone-based item collection for the specified item type.
- * Delegates to WorldUtils.findAndPickupItem() (was: xG2PP8jo4RWLS).
+ * Delegates to WorldUtils.findAndPickupItem() (was: HFbqnT1FEh2q.Q90GLXQ0Pef).
  */
 public class FindItem extends Command {
     public FindItem() {
@@ -29,7 +30,7 @@ public class FindItem extends Command {
             .executes(ctx -> {
                 ItemStack stack = ItemStackArgumentType.getItemStackArgument((CommandContext) ctx, "item").createStack(1, false);
                 if (stack != null && stack.getItem() != Items.AIR) {
-                    WorldUtils.findAndPickupItem(stack.getItem()); // was: xG2PP8jo4RWLS(Item)
+                    WorldUtils.findAndPickupItem(stack.getItem()); // was: HFbqnT1FEh2q.Q90GLXQ0Pef(Item)
                 }
                 return 1;
             }));

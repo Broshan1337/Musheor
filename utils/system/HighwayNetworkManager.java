@@ -1,4 +1,5 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// Class name and members were already readable.
 package musheor.utils.system;
 
 import com.google.gson.Gson;
@@ -9,46 +10,42 @@ import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Downloads highway configuration data from https://highways.musheck.dev.
- *
- * The remote JSON maps server names (e.g. "2b2t") to objects containing:
- *   - "ring_distances"    : double[] — distances where ring roads cross the highway
- *   - "diamond_distances" : double[] — distances for diamond-pattern waypoints
- *
- * Falls back to hardcoded 2b2t values if the fetch fails.
- * Only performs outbound GET requests — no data is ever uploaded.
+ * Loads per-server highway ring/diamond radii used by the highway router and AxisViewer.
+ * Ships with hardcoded 2b2t fallbacks and, on startup, fetches the up-to-date config from
+ * {@code https://highways.musheck.dev} (a plain read-only GET; audited benign), merging it
+ * over the fallbacks. Consumers read via {@link #getRingDistances}/{@link #getDiamondDistances}.
  */
 public class HighwayNetworkManager {
+    private static final String HIGHWAY_URL = "https://highways.musheck.dev";
+    private static final HighwayServerConfig FALLBACK_2B2T = new HighwayServerConfig(
+        new double[]{500.0, 1000.0, 1500.0, 2000.0, 2500.0, 7500.5, 55000.0, 62500.0, 100000.0, 125000.0,
+            250000.0, 500000.0, 750000.0, 1000000.0, 1250000.0, 1875000.0, 2500000.0, 3750000.0},
+        new double[]{2500.0, 5000.0, 25000.0, 50000.0, 125000.0, 250000.0, 500000.0, 3750000.0});
+    private static final Map<String, HighwayServerConfig> FALLBACK_CONFIGS;
     public static final HighwayNetworkManager INSTANCE = new HighwayNetworkManager();
 
-    private static final String HIGHWAY_URL = "https://highways.musheck.dev";
-
-    /** Hardcoded fallback config for 2b2t (used if remote fetch fails). */
-    private static final HighwayServerConfig FALLBACK_2B2T = new HighwayServerConfig(
-        new double[]{500, 1000, 1500, 2000, 2500, 7500.5, 55000, 62500, 100000, 125000,
-                     250000, 500000, 750000, 1000000, 1250000, 1875000, 2500000, 3750000},
-        new double[]{2500, 5000, 25000, 50000, 125000, 250000, 500000, 3750000}
-    );
-
-    private static final Map<String, HighwayServerConfig> FALLBACK_CONFIGS;
-
-    private final AtomicReference<Map<String, HighwayServerConfig>> configs =
-        new AtomicReference<>(FALLBACK_CONFIGS);
-
-    private final CopyOnWriteArrayList<Runnable> onLoadedCallbacks = new CopyOnWriteArrayList<>();
-    private volatile boolean loaded = false;
+    private final AtomicReference<Map<String, HighwayServerConfig>> configs;
+    private final CopyOnWriteArrayList<Runnable> onLoadedCallbacks;
+    private volatile boolean loaded;
 
     private HighwayNetworkManager() {
-        fetchRemoteHighways();
+        this.configs = new AtomicReference<>(FALLBACK_CONFIGS);
+        this.onLoadedCallbacks = new CopyOnWriteArrayList<>();
+        this.loaded = false;
+        this.fetchRemoteHighways();
     }
 
-    /** Async fetch of highway configs from the remote server. */
+    /** Asynchronously GETs the remote highway config and merges it over the fallbacks. */
     public void fetchRemoteHighways() {
         CompletableFuture.runAsync(() -> {
             try {
@@ -57,41 +54,37 @@ public class HighwayNetworkManager {
                 conn.setConnectTimeout(5000);
                 conn.setReadTimeout(5000);
                 conn.setRequestProperty("User-Agent", "MusheorAddon");
-
                 if (conn.getResponseCode() != 200) {
                     System.err.println("[HighwayNetworkManager] HTTP " + conn.getResponseCode() + " — keeping fallback configs.");
                     return;
                 }
 
                 InputStreamReader reader = new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8);
-                JsonObject json = new Gson().fromJson(reader, JsonObject.class);
+                JsonObject root = new Gson().fromJson(reader, JsonObject.class);
                 reader.close();
+                Map<String, HighwayServerConfig> parsed = new LinkedHashMap<>();
 
-                LinkedHashMap<String, HighwayServerConfig> parsed = new LinkedHashMap<>();
-                for (Map.Entry<String, JsonElement> entry : json.entrySet()) {
-                    String serverName = entry.getKey();
-                    JsonObject serverJson = entry.getValue().getAsJsonObject();
-                    double[] rings    = parseDoubleArray(serverJson, "ring_distances");
-                    double[] diamonds = parseDoubleArray(serverJson, "diamond_distances");
-
-                    // Fall back to existing config values if the remote doesn't provide them
-                    HighwayServerConfig existing = configs.get().getOrDefault(serverName, HighwayServerConfig.EMPTY);
-                    if (rings == null || rings.length == 0)    rings    = existing.ringDistances();
-                    if (diamonds == null || diamonds.length == 0) diamonds = existing.diamondDistances();
-
-                    parsed.put(serverName, new HighwayServerConfig(rings, diamonds));
+                for (Map.Entry<String, JsonElement> entry : root.entrySet()) {
+                    String serverKey = entry.getKey();
+                    JsonObject serverData = entry.getValue().getAsJsonObject();
+                    double[] ring = this.parseDoubleArray(serverData, "ring_distances");
+                    double[] diamond = this.parseDoubleArray(serverData, "diamond_distances");
+                    HighwayServerConfig existing = this.configs.get().getOrDefault(serverKey, HighwayServerConfig.EMPTY);
+                    if (ring == null || ring.length == 0) ring = existing.ringDistances();
+                    if (diamond == null || diamond.length == 0) diamond = existing.diamondDistances();
+                    parsed.put(serverKey, new HighwayServerConfig(ring, diamond));
                 }
 
-                LinkedHashMap<String, HighwayServerConfig> merged = new LinkedHashMap<>(configs.get());
+                Map<String, HighwayServerConfig> merged = new LinkedHashMap<>(this.configs.get());
                 merged.putAll(parsed);
-                configs.set(Collections.unmodifiableMap(merged));
-                loaded = true;
+                this.configs.set(Collections.unmodifiableMap(merged));
+                this.loaded = true;
+                System.out.println("[HighwayNetworkManager] Loaded configs for servers: " + this.configs.get().keySet());
 
-                System.out.println("[HighwayNetworkManager] Loaded configs for servers: " + configs.get().keySet());
-
-                for (Runnable cb : onLoadedCallbacks) {
-                    try { cb.run(); }
-                    catch (Exception e) {
+                for (Runnable cb : this.onLoadedCallbacks) {
+                    try {
+                        cb.run();
+                    } catch (Exception e) {
                         System.err.println("[HighwayNetworkManager] Callback error: " + e.getMessage());
                     }
                 }
@@ -102,60 +95,62 @@ public class HighwayNetworkManager {
         });
     }
 
-    private double[] parseDoubleArray(JsonObject json, String key) {
-        if (!json.has(key)) return null;
-        JsonArray arr = json.getAsJsonArray(key);
-        double[] result = new double[arr.size()];
-        for (int i = 0; i < arr.size(); i++) {
+    /** Parses a JSON array of doubles under {@code key}, skipping invalid entries, or null if absent. */
+    private double[] parseDoubleArray(JsonObject root, String key) {
+        if (!root.has(key)) return null;
+        JsonArray array = root.getAsJsonArray(key);
+        double[] result = new double[array.size()];
+        for (int i = 0; i < array.size(); i++) {
+            JsonElement el = array.get(i);
             try {
-                result[i] = arr.get(i).getAsDouble();
+                result[i] = el.getAsDouble();
             } catch (NumberFormatException e) {
-                System.err.println("[HighwayNetworkManager] Skipping invalid number in '" + key + "': " + arr.get(i));
+                System.err.println("[HighwayNetworkManager] Skipping invalid number in '" + key + "': " + el);
             }
         }
         return result;
     }
 
-    public static HighwayNetworkManager getInstance() { return INSTANCE; }
+    public static HighwayNetworkManager getInstance() {
+        return INSTANCE;
+    }
 
-    public boolean isLoaded() { return loaded; }
+    public boolean isLoaded() {
+        return this.loaded;
+    }
 
-    public HighwayServerConfig getConfig(String serverName) {
-        Map<String, HighwayServerConfig> map = configs.get();
-        if (map == null) return HighwayServerConfig.EMPTY;
-        return map.getOrDefault(serverName, HighwayServerConfig.EMPTY);
+    public HighwayServerConfig getConfig(String serverKey) {
+        Map<String, HighwayServerConfig> map = this.configs.get();
+        return map == null ? HighwayServerConfig.EMPTY : map.getOrDefault(serverKey, HighwayServerConfig.EMPTY);
     }
 
     public List<String> getServerNames() {
-        ArrayList<String> names = new ArrayList<>(configs.get().keySet());
+        List<String> names = new ArrayList<>(this.configs.get().keySet());
         Collections.sort(names);
         return names.isEmpty() ? Collections.emptyList() : names;
     }
 
-    /** Register a callback to run once the remote config has loaded. Runs immediately if already loaded. */
+    /** Runs {@code callback} immediately if already loaded, otherwise once the remote config arrives. */
     public void onLoaded(Runnable callback) {
-        if (loaded) callback.run();
-        else onLoadedCallbacks.add(callback);
+        if (this.loaded) callback.run();
+        else this.onLoadedCallbacks.add(callback);
     }
 
-    public double[] getRingDistances(String serverName) {
-        return getConfig(serverName).ringDistances();
+    public double[] getRingDistances(String serverKey) {
+        return this.getConfig(serverKey).ringDistances();
     }
 
-    public double[] getDiamondDistances(String serverName) {
-        return getConfig(serverName).diamondDistances();
+    public double[] getDiamondDistances(String serverKey) {
+        return this.getConfig(serverKey).diamondDistances();
     }
 
     static {
-        LinkedHashMap<String, HighwayServerConfig> fallback = new LinkedHashMap<>();
-        fallback.put("2b2t", FALLBACK_2B2T);
-        FALLBACK_CONFIGS = Collections.unmodifiableMap(fallback);
+        Map<String, HighwayServerConfig> m = new LinkedHashMap<>();
+        m.put("2b2t", FALLBACK_2B2T);
+        FALLBACK_CONFIGS = Collections.unmodifiableMap(m);
     }
 
-    /**
-     * Immutable config for one server: the distances at which ring roads
-     * and diamond-pattern waypoints intersect the main highway.
-     */
+    /** Ring and diamond highway radii for a single server. */
     public record HighwayServerConfig(double[] ringDistances, double[] diamondDistances) {
         public static final HighwayServerConfig EMPTY = new HighwayServerConfig(new double[0], new double[0]);
     }

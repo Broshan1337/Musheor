@@ -1,4 +1,5 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// (source class was obfuscated as obf.GZpL)
 package musheor.utils;
 
 import baritone.api.pathing.goals.Goal;
@@ -8,31 +9,25 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import meteordevelopment.meteorclient.renderer.ShapeMode;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
-import meteordevelopment.meteorclient.utils.render.RenderUtils;
-import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import musheor.modules.automation.EchestFarmer;
 import musheor.modules.automation.HighwayBuilder;
+import musheor.modules.automation.InventoryManager;
+import musheor.modules.automation.KekBounce;
 import musheor.modules.automation.KekNuker;
 import musheor.modules.automation.SourceRemover;
-import musheor.utils.BlockPositions;
-import musheor.utils.InventoryManager;
-import musheor.utils.PlayerUtils;
-import musheor.utils.StatsHandler;
-import musheor.utils.WorldUtils;
+import musheor.utils.internal.HighwayLocator;
 import musheor.utils.internal.HighwayState;
 import musheor.utils.internal.PathingHelper;
 import musheor.utils.system.MusheorSystem;
-import net.minecraft.block.AirBlock;
 import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.FluidBlock;
+import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.fluid.FluidState;
 import net.minecraft.fluid.Fluids;
 import net.minecraft.item.Items;
 import net.minecraft.registry.Registries;
@@ -40,664 +35,818 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 
 /**
- * Per-tick logic dispatcher for all highway-building modes.
- *
- * HighwayBuilder's onTick calls one of:
- *   handleCardinalHighwayTick()   — straight N/S/E/W highways
- *   handleDiagonalHighwayTick()   — diagonal highways
- *   handleIceRailTick()           — ice-floor cardinal highways
- *   handleDiagonalIceRailTick()   — ice-floor diagonal highways
- *
- * Echest farming interruption is handled by handleEchestFarming() / handlePostEchestFarm().
+ * The per-tick "brain" of the HighwayBuilder. Contains the pave/dig loops for both
+ * cardinal and diagonal highways, the Auto-mode combined loop, ring/diamond corner
+ * turning, elytra-bounce management, and fall-recovery pathing. All heavy block
+ * scanning/placement is delegated to {@link WorldUtils} and {@link BlockPositions}.
  */
 public class Handlers {
-    public static final MinecraftClient mc = MinecraftClient.getInstance();        // was: r9l7h0HpZAuA
-    public static final List<BlockPos> visitedPositions = new ArrayList<BlockPos>(); // was: D2cyo0
+    public static final MinecraftClient mc = MinecraftClient.getInstance(); // was: FvaNWO (field)
+    private static final int CONST_TWO = 2;         // was: psJq59YIbp3Z
+    private static final int CONST_ONE = 1;         // was: SOYyh5IPg26f7F
+    private static boolean bouncing = false;        // was: rKbT3Ifwo
+    private static int bounceCooldownTicks = 0;     // was: r7hOYIKN2
+    private static final int BOUNCE_COOLDOWN = 20;   // was: oZHMlTL
+    private static final int SCAN_32 = 32;           // was: xQr5FhbwpQPWgIQ
+    private static boolean fellOff = false;          // was: OMMZL1F3q
+    private static int offHighwayTicks = 0;          // was: zu3a44xDeMFMCRwm
+    private static int repathTicks = 0;              // was: krxNb5lcQuWA
+    private static final int FALL_GRACE = 15;        // was: nt0HZnvBBp
+    private static final int REPATH_INTERVAL = 40;   // was: amz3UB1vE
+    private static final int RECOVERY_RANGE = 24;    // was: sBBIyQG5NWq0K
 
-    // -------------------------------------------------------------------------
-    // Echest farming helpers
-    // -------------------------------------------------------------------------
-
-    /**
-     * Called when the highway builder decides to farm echests.
-     * Enables EchestFarmer, sets the target amount, and handles lag detection
-     * by pausing AutoWalk and returning to the highway if Baritone isn't pathing.
-     */
-    public static void handleEchestFarming() { // was: gANxWblT
+    /** Starts the echest farmer to mine obsidian from ender chests. */
+    public static void runEchestFarmer() { // was: FvaNWO()
         HighwayState state = HighwayState.getInstance();
         PlayerUtils.setModuleSetting(EchestFarmer.class, "self-toggle", true);
-        state.setEchestFarmPos(mc.player.getBlockPos());
-        if (WorldUtils.isLagDetected()) {
-            PlayerUtils.setAutoWalkActive(false);
-            if (!PathingHelper.isAlreadyPathing()) {
-                WorldUtils.returnToHighway();
-            }
-            return;
-        }
-        if (!state.isEchestFarming()) {
+        state.setLastPlayerBlockPos(mc.player.getBlockPos());
+        if (WorldUtils.unusedFalse()) {
+            PlayerUtils.setAutoWalk(false);
+            if (!PathingHelper.isPathing()) WorldUtils.returnToHighway();
+        } else if (!state.isFlag12()) {
             assert mc.player != null;
-            int needed = InventoryManager.countItem(Items.ENDER_CHEST) - 8;
-            if (needed > 0) {
-                PlayerUtils.setModuleSetting(EchestFarmer.class, "amount",
-                    Math.min(needed, InventoryManager.countShulkerBoxes() * 8));
+            int remaining = InventoryManager.countItemInInventory(Items.ENDER_CHEST) - 8;
+            if (remaining > 0) {
+                PlayerUtils.setModuleSetting(EchestFarmer.class, "amount", Math.min(remaining, InventoryManager.countEmptyInventorySlots() * 8));
             }
-            PlayerUtils.setAutoWalkActive(false);
-            state.setAutoWalkEnabled(true);
-            Module module = Modules.get().get(EchestFarmer.class);
-            if (!module.isActive()) {
-                state.setEchestFarmerEnabled(true);
-                module.toggle();
+            PlayerUtils.setAutoWalk(false);
+            state.setFlag12(true);
+            Module echestFarmer = Modules.get().get(EchestFarmer.class);
+            if (!echestFarmer.isActive()) {
+                state.setFlag11(true);
+                echestFarmer.toggle();
             }
         }
     }
 
-    /**
-     * Called after echest farming finishes.
-     * If EchestFarmer left an incorrect block (ender chest still placed),
-     * breaks it. Once the block is clear and GatherItem is done, re-enables
-     * obsidian gathering and clears the farming flags.
-     */
-    public static void handlePostEchestFarm() { // was: PlefynG
+    /** After echest farming: mine the placed ender chest back up and reset restock flags. */
+    public static void runPostEchestFarmer() { // was: Q90GLXQ0Pef()
         HighwayState state = HighwayState.getInstance();
-        if (!HighwayBuilder.isRestocking() && state.wasEchestFarmerEnabled()) {
-            if (EchestFarmer.echestPos != null
-                    && mc.world.getBlockState(EchestFarmer.echestPos).getBlock() == Blocks.ENDER_CHEST) {
-                MusheorSystem.debug("Attempting to break incorrect block...", new Object[0]);
-                BlockUtils.breakBlock((BlockPos) EchestFarmer.echestPos, true);
+        if (!HighwayBuilder.isEchestFarmerActive() && state.isFlag11()) {
+            if (EchestFarmer.targetPos != null && mc.world.getBlockState(EchestFarmer.targetPos).getBlock() == Blocks.ENDER_CHEST) {
+                MusheorSystem.debug("Attempting to break incorrect block...");
+                BlockUtils.breakBlock(EchestFarmer.targetPos, true);
                 return;
             }
             if (PlayerUtils.isGatheringItem()) return;
-            PlayerUtils.startGatherItem(Items.OBSIDIAN, false);
-            state.setAutoWalkEnabled(false);
-            state.setEchestFarmerEnabled(false);
+            PlayerUtils.gatherItem(Items.OBSIDIAN, false);
+            state.setFlag12(false);
+            state.setFlag11(false);
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Cardinal highway tick
-    // -------------------------------------------------------------------------
-
-    /**
-     * Main tick handler for straight (cardinal N/S/E/W) highway building.
-     *
-     * Each tick:
-     *  1. Returns early if HighwayState is not fully initialised
-     *  2. Pauses walking if EchestFarmer, GatherItem, or SourceRemover is running
-     *  3. Scans floor positions (−3 to +5 ahead) for missing blocks → path back
-     *  4. Scans clear positions for blockages behind the player → path forward
-     *  5. Fills KekNuker's queue with blocks that need to be removed
-     *  6. Places floor and ceiling blocks via WorldUtils.tryPlaceBlocks()
-     *  7. Enables AutoWalk when all placement/nuking is idle
-     */
-    public static void handleCardinalHighwayTick() { // was: Pmh3HuqB53i0Y
-        GoalBlock goalBlock;
-        Block block;
+    // ----------------------------------------------------------------------
+    // PAVE — cardinal
+    // ----------------------------------------------------------------------
+    public static void paveCardinal() { // was: psJq59YIbp3Z()
         assert mc.player != null && mc.world != null;
         HighwayState state = HighwayState.getInstance();
+        if (state.getDirection() == null || state.getCenterX() == null || state.getCenterY() == null || state.getCenterZ() == null) return;
+        if (handleFallRecovery(state)) return;
 
-        // Require all position anchors to be set before doing any work
-        if (state.getDirection() == null
-                || state.getAlignStartX() == null
-                || state.getHighwayY() == null
-                || state.getAlignStartZ() == null) {
+        Module echestFarmer = Modules.get().get(EchestFarmer.class);
+        Map<String, Boolean> conditions = new LinkedHashMap<>();
+        conditions.put("BetterEchestFarmer", echestFarmer.isActive());
+        conditions.put("Gathering Items", PlayerUtils.isGatheringItem());
+        conditions.put("Removing Lava", SourceRemover.isRemoving());
+        if (echestFarmer.isActive() || PlayerUtils.isGatheringItem() || SourceRemover.isRemoving()) {
+            PlayerUtils.setAutoWalk(false);
+            for (Map.Entry<String, Boolean> entry : conditions.entrySet())
+                if (entry.getValue()) MusheorSystem.debug(entry.getKey() + " was triggered.");
             return;
         }
 
-        Module echestModule = Modules.get().get(EchestFarmer.class);
+        if (KekNuker.isBusyInBuildZone() || HighwayBuilder.isEating() || HighwayBuilder.isKillAuraAttacking() || InventoryManager.isPending) {
+            stopBounce();
+            PlayerUtils.setAutoWalk(false);
+        }
+        if (HighwayBuilder.advancedSourceFiller()) WorldUtils.handleLavaRemoval();
 
-        // Debug map: log which subsystem paused walking this tick
-        LinkedHashMap<String, Boolean> pauseReasons = new LinkedHashMap<String, Boolean>();
-        pauseReasons.put("BetterEchestFarmer", echestModule.isActive());
-        pauseReasons.put("Gathering Items",    PlayerUtils.isGatheringItem());
-        pauseReasons.put("Removing Lava",      SourceRemover.isActive());
-
-        if (echestModule.isActive() || PlayerUtils.isGatheringItem() || SourceRemover.isActive()) {
-            PlayerUtils.setAutoWalkActive(false);
-            for (Map.Entry entry : pauseReasons.entrySet()) {
-                if (!((Boolean) entry.getValue()).booleanValue()) continue;
-                MusheorSystem.debug((String) entry.getKey() + " was triggered.", new Object[0]);
-            }
-            return;
+        if (HighwayBuilder.isAutoBounceEnabled() && HighwayBuilder.getMode() == HighwayBuilder.Mode.SEMI) {
+            if (bounceCooldownTicks > 0) { bounceCooldownTicks--; return; }
+            boolean interrupted = KekNuker.isBusyInBuildZone() || HighwayBuilder.isEating() || HighwayBuilder.isKillAuraAttacking()
+                || InventoryManager.isPending || PlayerUtils.isGatheringItem() || SourceRemover.isRemoving()
+                || echestFarmer.isActive() || PathingHelper.isPathing();
+            if (!interrupted && isPathClearAhead(true, HighwayBuilder.getBounceDistanceCheck())) startBounce();
+            else stopBounce();
+            if (bouncing) { PlayerUtils.faceHighwayDirection(); return; }
         }
 
-        // Pause walking while KekNuker is running, restocking, breaking shulker, etc.
-        if (KekNuker.isNuking()
-                || HighwayBuilder.isEating()
-                || HighwayBuilder.isWaiting()
-                || InventoryManager.isBreakingShulker) {
-            PlayerUtils.setAutoWalkActive(false);
+        if (HighwayBuilder.getMode() == HighwayBuilder.Mode.SEMI) {
+            PlayerUtils.correctDrift();
+            WorldUtils.checkFrontCollision();
+            PlayerUtils.faceHighwayDirectionPitchDown();
+            PlayerUtils.strafeToCenterline();
         }
 
-        // In AutoWalk mode: keep the player facing the highway and strafe to center
-        if (HighwayBuilder.getMovementMode() == HighwayBuilder.Mode.AUTOWALK) {
-            PlayerUtils.alignWithBaritoneXZ();
-            WorldUtils.checkForwardCollisions();
-            PlayerUtils.alignLookToHighway();
-            PlayerUtils.applyStrafing();
-        }
+        BlockPos[] positions = BlockPositions.cardinalFloor(2, 3, HighwayBuilder.placeLeftRail(), HighwayBuilder.placeRightRail());
+        if (HighwayBuilder.INSTANCE.toggleKekNuker.get()) KekNuker.extraBreakQueue.clear();
 
-        // Floor positions to check/place for the current cross-section (behind=2, ahead=3)
-        BlockPos[] floorPositions = BlockPositions.getFloorPositions(
-            2, 3, HighwayBuilder.hasLeftWall(), HighwayBuilder.hasRightWall());
-        state.setPlacedFloor(false);
-        WorldUtils.detectAndHandleSpleef(floorPositions); // was: jOdDDFXSeWl4(BlockPos[])
-
-        List<Block> nukerBlacklist = KekNuker.getBlacklist();
-        state.setFoundMissingBlock(false);
-        BlockPos missingPos = null;
-        boolean blockedBehind = false;
-        BlockPos blockedPos = null;
-
-        if (HighwayBuilder.getMovementMode() == HighwayBuilder.Mode.AUTOWALK) {
-            // Scan for missing floor blocks (behind=−3, ahead=+5)
-            for (BlockPos pos : BlockPositions.getFloorPositions(-3, 5, HighwayBuilder.hasLeftWall(), HighwayBuilder.hasRightWall())) {
-                block = mc.world.getBlockState(pos).getBlock();
-                if (!HighwayBuilder.allowLava() && block == Blocks.CRYING_OBSIDIAN
-                        || block == HighwayBuilder.getFloorBlock()
-                        || StatsHandler.getObsidianCount() <= 10
-                        || nukerBlacklist.contains(block)) continue;
-                state.setFoundMissingBlock(true);
-                missingPos = pos;
-                break;
-            }
-            // Optionally check ceiling positions too
-            if (HighwayBuilder.hasCeiling()) {
-                for (BlockPos pos : BlockPositions.getCeilingPositions(-3, 4, HighwayBuilder.hasLeftWall(), HighwayBuilder.hasRightWall())) {
-                    block = mc.world.getBlockState(pos).getBlock();
-                    if (!HighwayBuilder.allowLava() && block == Blocks.CRYING_OBSIDIAN
-                            || block == Blocks.BEDROCK
-                            || block != Blocks.AIR
-                            || StatsHandler.getObsidianCount() <= 10
-                            || nukerBlacklist.contains(block)) continue;
-                    state.setFoundMissingBlock(true);
-                    missingPos = pos;
-                    break;
+        state.setFlag6(false);
+        WorldUtils.spleefEntities(positions);
+        List<Block> blacklistedBlocks = KekNuker.getBlacklist();
+        state.setFlag5(false);
+        BlockPos nonObsidianBlock = null;
+        boolean foundBlockage = false;
+        BlockPos blockage = null;
+        if (HighwayBuilder.getMode() == HighwayBuilder.Mode.SEMI) {
+            for (BlockPos currentPos : BlockPositions.cardinalFloor(-3, 5, HighwayBuilder.placeLeftRail(), HighwayBuilder.placeRightRail())) {
+                Block block = mc.world.getBlockState(currentPos).getBlock();
+                if ((HighwayBuilder.replaceCryingObsidian() || block != Blocks.RESPAWN_ANCHOR)
+                    && block != HighwayBuilder.getFillBlock() && StatsHandler.getDistanceTravelled() > 10 && !blacklistedBlocks.contains(block)) {
+                    state.setFlag5(true); nonObsidianBlock = currentPos; break;
                 }
             }
-            // Scan for obstacles in the clear (passage) zone behind the player
-            for (BlockPos pos : BlockPositions.getForwardClearPositions()) {
-                block = mc.world.getBlockState(pos).getBlock();
-                if (block instanceof AirBlock
-                        || StatsHandler.getObsidianCount() <= 10
-                        || nukerBlacklist.contains(block)) continue;
-                blockedBehind = true;
-                blockedPos = pos;
-                break;
+            if (HighwayBuilder.hasCeiling()) {
+                for (BlockPos currentPos : BlockPositions.cardinalCeiling(-3, 4, HighwayBuilder.placeLeftRail(), HighwayBuilder.placeRightRail())) {
+                    Block block = mc.world.getBlockState(currentPos).getBlock();
+                    if ((HighwayBuilder.replaceCryingObsidian() || block != Blocks.RESPAWN_ANCHOR)
+                        && block != Blocks.BEDROCK && block == Blocks.AIR && StatsHandler.getDistanceTravelled() > 10 && !blacklistedBlocks.contains(block)) {
+                        state.setFlag5(true); nonObsidianBlock = currentPos; break;
+                    }
+                }
+            }
+            for (BlockPos currentPos : BlockPositions.cardinalWallScan()) {
+                Block block = mc.world.getBlockState(currentPos).getBlock();
+                if (!(block instanceof FluidBlock) && StatsHandler.getDistanceTravelled() > 10 && !blacklistedBlocks.contains(block)) {
+                    foundBlockage = true; blockage = currentPos; break;
+                }
             }
         }
 
-        // If there's a block behind blocking movement, path just past it
-        if (blockedBehind) {
-            PlayerUtils.setAutoWalkActive(false);
-            MusheorSystem.debug("Detected blockage behind player... %s",
-                mc.world.getBlockState(blockedPos).getBlock().getName());
-            assert blockedPos != null;
-            goalBlock = switch (HighwayBuilder.getDirection()) {
-                case WorldUtils.Direction8.NORTH -> new GoalBlock(state.getAlignStartX().intValue(), state.getHighwayY().intValue(), blockedPos.getZ() + 2);
-                case WorldUtils.Direction8.WEST  -> new GoalBlock(blockedPos.getX() - 2,     state.getHighwayY().intValue(), state.getAlignStartZ().intValue());
-                case WorldUtils.Direction8.SOUTH -> new GoalBlock(state.getAlignStartX().intValue(), state.getHighwayY().intValue(), blockedPos.getZ() - 2);
-                case WorldUtils.Direction8.EAST  -> new GoalBlock(blockedPos.getX() + 2,     state.getHighwayY().intValue(), state.getAlignStartZ().intValue());
-                default -> new GoalBlock(state.getAlignStartX().intValue(), state.getHighwayY().intValue(), state.getAlignStartZ().intValue());
+        if (foundBlockage) {
+            PlayerUtils.setAutoWalk(false);
+            MusheorSystem.debug("Detected blockage behind player... %s", mc.world.getBlockState(blockage).getBlock().getName());
+            assert blockage != null;
+            Goal goal = switch (HighwayBuilder.getDirection()) {
+                case NORTH -> new GoalBlock(state.getCenterX(), state.getCenterY(), blockage.getZ() + 2);
+                case EAST  -> new GoalBlock(blockage.getX() - 2, state.getCenterY(), state.getCenterZ());
+                case SOUTH -> new GoalBlock(state.getCenterX(), state.getCenterY(), blockage.getZ() - 2);
+                case WEST  -> new GoalBlock(blockage.getX() + 2, state.getCenterY(), state.getCenterZ());
+                default    -> new GoalBlock(state.getCenterX(), state.getCenterY(), state.getCenterZ());
             };
-            PathingHelper.setBaritoneGoal((Goal) goalBlock);
-            PathingHelper.startPathing();
-            return;
-        }
-
-        // If there's a missing floor block, path back to it
-        if (state.foundMissingBlock()) {
-            PlayerUtils.setAutoWalkActive(false);
-            MusheorSystem.debug("Found missing block, going back...", new Object[0]);
-            assert missingPos != null;
-            goalBlock = switch (HighwayBuilder.getDirection()) {
-                case WorldUtils.Direction8.NORTH, WorldUtils.Direction8.SOUTH ->
-                    new GoalBlock(state.getAlignStartX().intValue(), state.getHighwayY().intValue(), missingPos.getZ());
-                case WorldUtils.Direction8.WEST,  WorldUtils.Direction8.EAST ->
-                    new GoalBlock(missingPos.getX(), state.getHighwayY().intValue(), state.getAlignStartZ().intValue());
-                default ->
-                    new GoalBlock(missingPos.getX(), state.getHighwayY().intValue(), missingPos.getZ());
-            };
-            PathingHelper.setBaritoneGoal((Goal) goalBlock);
-            PathingHelper.startPathing();
-        }
-
-        // Build KekNuker's queue: anything in the floor or clear zone that needs breaking
-        if (((Boolean) HighwayBuilder.INSTANCE.enableNuker.get()).booleanValue()) {
-            KekNuker.nukerQueue.clear();
-            for (BlockPos pos : floorPositions) {
-                block = mc.world.getBlockState(pos).getBlock();
-                if (block == Blocks.NETHER_PORTAL
-                        || block instanceof AirBlock
-                        || !HighwayBuilder.allowLava() && block == Blocks.CRYING_OBSIDIAN
-                        || !WorldUtils.needsPlacement(pos, HighwayBuilder.getFloorBlock())) continue;
-                KekNuker.nukerQueue.add(pos.toImmutable());
+            PathingHelper.setGoal(goal);
+        } else {
+            if (state.isFlag5()) {
+                PlayerUtils.setAutoWalk(false);
+                MusheorSystem.debug("Found missing block, going back...");
+                assert nonObsidianBlock != null;
+                Goal goal = switch (HighwayBuilder.getDirection()) {
+                    case NORTH, SOUTH -> new GoalBlock(state.getCenterX(), state.getCenterY(), nonObsidianBlock.getZ());
+                    case EAST, WEST   -> new GoalBlock(nonObsidianBlock.getX(), state.getCenterY(), state.getCenterZ());
+                    default           -> new GoalBlock(nonObsidianBlock.getX(), state.getCenterY(), nonObsidianBlock.getZ());
+                };
+                PathingHelper.setGoal(goal);
             }
-            for (BlockPos pos : BlockPositions.getClearPositions(2, 3)) {
-                block = mc.world.getBlockState(pos).getBlock();
-                if (block == Blocks.NETHER_PORTAL
-                        || block instanceof AirBlock
-                        || !WorldUtils.needsPlacement(pos, Blocks.AIR)) continue;
-                KekNuker.nukerQueue.add(pos.toImmutable());
+            if (HighwayBuilder.INSTANCE.toggleKekNuker.get()) {
+                for (BlockPos pos : positions) {
+                    Block block = mc.world.getBlockState(pos).getBlock();
+                    if (block != Blocks.VOID_AIR && block != Blocks.BEDROCK
+                        && (HighwayBuilder.replaceCryingObsidian() || block != Blocks.RESPAWN_ANCHOR)
+                        && WorldUtils.shouldBreak(pos, HighwayBuilder.getFillBlock())) {
+                        KekNuker.extraBreakQueue.add(pos.toImmutable());
+                    }
+                }
+                for (BlockPos pos : BlockPositions.cardinalTunnel(3, 2)) {
+                    Block block = mc.world.getBlockState(pos).getBlock();
+                    if (block != Blocks.VOID_AIR && block != Blocks.BEDROCK && WorldUtils.shouldBreak(pos, Blocks.AIR)) {
+                        KekNuker.extraBreakQueue.add(pos.toImmutable());
+                    }
+                }
             }
-        }
-
-        // Place floor and ceiling blocks
-        state.setPlacedFloor(false);
-        WorldUtils.tryPlaceBlocks(floorPositions, false);
-        if (HighwayBuilder.hasCeiling()) {
-            WorldUtils.tryPlaceBlocks(BlockPositions.getCeilingPositions(2, 2, HighwayBuilder.hasLeftWall(), HighwayBuilder.hasRightWall()), false);
-        }
-
-        // Resume walking if nothing is pending
-        if (!(state.isFloorPlaced()
-                && state.isCeilingPlaced()
-                && state.foundMissingBlock()
-                && KekNuker.isNuking()
-                && state.isObsidianReady())) {
-            PlayerUtils.setAutoWalkActive(true);
+            state.setFlag4(false);
+            WorldUtils.placeHighwayBlocks(positions, false);
+            if (HighwayBuilder.hasCeiling()) {
+                WorldUtils.placeHighwayBlocks(BlockPositions.cardinalCeiling(2, 2, HighwayBuilder.placeLeftRail(), HighwayBuilder.placeRightRail()), false);
+            }
+            if (!state.isFlag4() || !state.isFlag3() || !state.isFlag5() || !KekNuker.isBusyInBuildZone() || !state.isFlag6()) {
+                PlayerUtils.setAutoWalk(true);
+            }
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Diagonal highway tick
-    // -------------------------------------------------------------------------
-
-    /**
-     * Main tick handler for diagonal highway building (NW/NE/SW/SE).
-     *
-     * Mirrors handleCardinalHighwayTick() with:
-     *  - Diagonal BlockPositions methods used instead of cardinal ones
-     *  - Diagonal alignment tracking (equal X/Z delta → update align coords)
-     *  - GoalBlock offsets use ±8 instead of ±2 when returning to missing blocks
-     */
-    public static void handleDiagonalHighwayTick() { // was: eNsdDMk8mJXTb
-        BlockPos blockedPos;
-        Block block;
-        BlockPos missingPos;
-        Module echestModule;
+    // ----------------------------------------------------------------------
+    // PAVE — diagonal
+    // ----------------------------------------------------------------------
+    public static void paveDiagonal() { // was: SOYyh5IPg26f7F()
         assert mc.player != null && mc.world != null;
         HighwayState state = HighwayState.getInstance();
+        if (state.getDirection() == null || state.getCenterX() == null || state.getCenterY() == null || state.getCenterZ() == null) return;
+        if (handleFallRecovery(state)) return;
 
-        if (state.getDirection() == null || state.getAlignStartX() == null
-                || state.getHighwayY() == null || state.getAlignStartZ() == null) {
-            return;
-        }
-
-        // Track diagonal alignment: when |Δx| == |Δz| we are exactly on the diagonal axis
-        double dx = mc.player.getX() - state.getDiagonalCenter().getX();
-        double dz = mc.player.getZ() - state.getDiagonalCenter().getZ();
+        double dx = mc.player.getBlockX() - state.getCenterPos().getX();
+        double dz = mc.player.getBlockZ() - state.getCenterPos().getZ();
         if (Math.abs(dx) == Math.abs(dz)) {
-            state.setAlignZ(mc.player.getZ());
-            state.setAlignX(mc.player.getX());
+            state.setCenterZ(mc.player.getBlockZ());
+            state.setCenterX(mc.player.getBlockX());
+        }
+        if (WorldUtils.unusedFalse()) {
+            PlayerUtils.setAutoWalk(false);
+            if (!PathingHelper.isPathing() && state.getReturnGoalPos() == null && state.getPendingBreakPos() == null) WorldUtils.returnToHighway();
         }
 
-        if (WorldUtils.isLagDetected()) {
-            PlayerUtils.setAutoWalkActive(false);
-            if (!PathingHelper.isAlreadyPathing()
-                    && state.getLavaTargetBlock() == null
-                    && state.getLavaSourceBlock() == null) {
-                WorldUtils.returnToHighway();
+        Module echestFarmer = Modules.get().get(EchestFarmer.class);
+        if (echestFarmer.isActive() || PlayerUtils.isGatheringItem() || SourceRemover.isRemoving()) return;
+
+        if (KekNuker.isBusyInBuildZone() || HighwayBuilder.isEating() || HighwayBuilder.isKillAuraAttacking() || InventoryManager.isPending) {
+            stopBounce();
+            PlayerUtils.setAutoWalk(false);
+        }
+        if (HighwayBuilder.advancedSourceFiller()) WorldUtils.handleLavaRemoval();
+
+        if (HighwayBuilder.isAutoBounceEnabled() && HighwayBuilder.getMode() == HighwayBuilder.Mode.SEMI) {
+            if (bounceCooldownTicks > 0) { bounceCooldownTicks--; return; }
+            boolean interrupted = KekNuker.isBusyInBuildZone() || HighwayBuilder.isEating() || HighwayBuilder.isKillAuraAttacking()
+                || InventoryManager.isPending || PlayerUtils.isGatheringItem() || SourceRemover.isRemoving()
+                || echestFarmer.isActive() || PathingHelper.isPathing();
+            if (!interrupted && isPathClearAhead(false, HighwayBuilder.getBounceDistanceCheck())) startBounce();
+            else stopBounce();
+            if (bouncing) { PlayerUtils.faceHighwayDirection(); return; }
+        }
+
+        if (HighwayBuilder.getMode() == HighwayBuilder.Mode.SEMI) {
+            PlayerUtils.alignToHighway();
+            WorldUtils.checkFrontCollision();
+            PlayerUtils.faceHighwayDirectionPitchDown();
+        }
+
+        List<Block> blacklistedBlocks = KekNuker.getBlacklist();
+        boolean foundBlockage = false;
+        BlockPos blockage = null;
+        if (HighwayBuilder.getMode() == HighwayBuilder.Mode.SEMI) {
+            for (BlockPos currentPos : BlockPositions.diagonalTunnel(-2, 5)) {
+                Block block = mc.world.getBlockState(currentPos).getBlock();
+                if (!(block instanceof FluidBlock) && StatsHandler.getDistanceTravelled() > 10 && !blacklistedBlocks.contains(block)) {
+                    foundBlockage = true; blockage = currentPos; break;
+                }
             }
-        }
-
-        if ((echestModule = Modules.get().get(EchestFarmer.class)).isActive()
-                || PlayerUtils.isGatheringItem()
-                || SourceRemover.isActive()) {
-            PlayerUtils.setAutoWalkActive(false);
-            return;
-        }
-
-        if (KekNuker.isNuking() || HighwayBuilder.isEating() || HighwayBuilder.isWaiting()
-                || InventoryManager.isBreakingShulker) {
-            PlayerUtils.setAutoWalkActive(false);
-        }
-
-        if (HighwayBuilder.isCheckingSpleef()) {
-            WorldUtils.handleLavaRemoval(); // was: selaO6lwe7
-        }
-
-        if (HighwayBuilder.getMovementMode() == HighwayBuilder.Mode.AUTOWALK) {
-            PlayerUtils.alignWithBaritone();
-            WorldUtils.checkForwardCollisions();
-            PlayerUtils.alignLookToHighway();
-        }
-
-        List<Block> nukerBlacklist = KekNuker.getBlacklist();
-        boolean blockedBehind = false;
-        BlockPos blockedBehindPos = null;
-
-        if (HighwayBuilder.getMovementMode() == HighwayBuilder.Mode.AUTOWALK) {
-            // Check for obstacles in the passage zone behind the player
-            for (BlockPos pos : BlockPositions.getDiagonalClearPositions(-3, 5)) {
-                Block b = mc.world.getBlockState(pos).getBlock();
-                if (b instanceof AirBlock || StatsHandler.getObsidianCount() <= 10
-                        || nukerBlacklist.contains(b)) continue;
-                blockedBehind = true;
-                blockedBehindPos = pos;
-                break;
-            }
-
-            if (blockedBehind) {
-                PlayerUtils.setAutoWalkActive(false);
-                MusheorSystem.debug("Detected blockage behind player... "
-                    + Registries.BLOCK.getId(mc.world.getBlockState(blockedBehindPos).getBlock()).getPath(),
-                    new Object[0]);
-                assert blockedBehindPos != null;
-                int offset = 4;
-                GoalBlock goalBlock = switch (HighwayBuilder.getDirection()) {
-                    case WorldUtils.Direction8.NORTH_WEST -> new GoalBlock(state.getAlignStartX() - offset, state.getHighwayY().intValue(), state.getAlignStartZ() + offset);
-                    case WorldUtils.Direction8.NORTH_EAST -> new GoalBlock(state.getAlignStartX() + offset, state.getHighwayY().intValue(), state.getAlignStartZ() + offset);
-                    case WorldUtils.Direction8.SOUTH_WEST -> new GoalBlock(state.getAlignStartX() - offset, state.getHighwayY().intValue(), state.getAlignStartZ() - offset);
-                    case WorldUtils.Direction8.SOUTH_EAST -> new GoalBlock(state.getAlignStartX() + offset, state.getHighwayY().intValue(), state.getAlignStartZ() - offset);
-                    default -> new GoalBlock(blockedBehindPos.getX(), state.getHighwayY().intValue(), blockedBehindPos.getZ());
+            if (foundBlockage) {
+                PlayerUtils.setAutoWalk(false);
+                MusheorSystem.debug("Detected blockage behind player... " + Registries.BLOCK.getId(mc.world.getBlockState(blockage).getBlock()).getPath());
+                assert blockage != null;
+                int distance = 4;
+                Goal goal = switch (HighwayBuilder.getDirection()) {
+                    case NORTH_EAST -> new GoalBlock(state.getCenterX() - distance, state.getCenterY(), state.getCenterZ() + distance);
+                    case NORTH_WEST -> new GoalBlock(state.getCenterX() + distance, state.getCenterY(), state.getCenterZ() + distance);
+                    case SOUTH_EAST -> new GoalBlock(state.getCenterX() - distance, state.getCenterY(), state.getCenterZ() - distance);
+                    case SOUTH_WEST -> new GoalBlock(state.getCenterX() + distance, state.getCenterY(), state.getCenterZ() - distance);
+                    default         -> new GoalBlock(blockage.getX(), state.getCenterY(), blockage.getZ());
                 };
-                PathingHelper.setBaritoneGoal((Goal) goalBlock);
-                PathingHelper.startPathing();
+                PathingHelper.setGoal(goal);
                 return;
             }
-
-            // Scan diagonal floor for missing blocks
-            state.setFoundMissingBlock(false);
-            missingPos = null;
-            for (BlockPos pos : BlockPositions.getDiagonalFloorPositions(-3, 4, HighwayBuilder.hasLeftWall(), HighwayBuilder.hasRightWall())) {
-                block = mc.world.getBlockState(pos).getBlock();
-                if (!HighwayBuilder.allowLava() && block == Blocks.CRYING_OBSIDIAN
-                        || block == HighwayBuilder.getFloorBlock()
-                        || StatsHandler.getObsidianCount() <= 10
-                        || block == Blocks.CRYING_OBSIDIAN && !HighwayBuilder.allowLava()
-                        || block instanceof AirBlock
-                        || nukerBlacklist.contains(block)) continue;
-                state.setFoundMissingBlock(true);
-                missingPos = pos;
-                break;
+            state.setFlag5(false);
+            BlockPos nonObsidianBlock = null;
+            for (BlockPos currentPos : BlockPositions.diagonalFloor(-3, 4, HighwayBuilder.placeLeftRail(), HighwayBuilder.placeRightRail())) {
+                Block block = mc.world.getBlockState(currentPos).getBlock();
+                if ((HighwayBuilder.replaceCryingObsidian() || block != Blocks.RESPAWN_ANCHOR)
+                    && block != HighwayBuilder.getFillBlock() && StatsHandler.getDistanceTravelled() > 10
+                    && (block != Blocks.RESPAWN_ANCHOR || HighwayBuilder.replaceCryingObsidian())
+                    && block != Blocks.BEDROCK && !blacklistedBlocks.contains(block)) {
+                    state.setFlag5(true); nonObsidianBlock = currentPos; break;
+                }
             }
             if (HighwayBuilder.hasCeiling()) {
-                for (BlockPos pos : BlockPositions.getDiagonalCeilingPositions(-3, 4, HighwayBuilder.hasLeftWall(), HighwayBuilder.hasRightWall())) {
-                    block = mc.world.getBlockState(pos).getBlock();
-                    if (!HighwayBuilder.allowLava() && block == Blocks.CRYING_OBSIDIAN
-                            || block != Blocks.AIR
-                            || StatsHandler.getObsidianCount() <= 10
-                            || nukerBlacklist.contains(block)) continue;
-                    state.setFoundMissingBlock(true);
-                    missingPos = pos;
-                    break;
+                for (BlockPos currentPos : BlockPositions.diagonalCeiling(-3, 4, HighwayBuilder.placeLeftRail(), HighwayBuilder.placeRightRail())) {
+                    Block block = mc.world.getBlockState(currentPos).getBlock();
+                    if ((HighwayBuilder.replaceCryingObsidian() || block != Blocks.RESPAWN_ANCHOR)
+                        && block == Blocks.AIR && StatsHandler.getDistanceTravelled() > 10 && !blacklistedBlocks.contains(block)) {
+                        state.setFlag5(true); nonObsidianBlock = currentPos; break;
+                    }
                 }
             }
-
-            if (state.foundMissingBlock()) {
-                PlayerUtils.setAutoWalkActive(false);
-                MusheorSystem.debug("Found missing block, going back...", new Object[0]);
-                assert missingPos != null;
-                RenderUtils.renderTickingBlock((BlockPos) missingPos, (Color) Color.WHITE, (Color) Color.WHITE,
-                    (ShapeMode) ShapeMode.Lines, 0, 20, true, false);
-                BlockPos goal = switch (HighwayBuilder.getDirection()) {
-                    case WorldUtils.Direction8.NORTH_WEST -> new GoalBlock(state.getAlignStartX() - 8, state.getHighwayY().intValue(), state.getAlignStartZ() + 8);
-                    case WorldUtils.Direction8.NORTH_EAST -> new GoalBlock(state.getAlignStartX() + 8, state.getHighwayY().intValue(), state.getAlignStartZ() + 8);
-                    case WorldUtils.Direction8.SOUTH_WEST -> new GoalBlock(state.getAlignStartX() - 8, state.getHighwayY().intValue(), state.getAlignStartZ() - 8);
-                    case WorldUtils.Direction8.SOUTH_EAST -> new GoalBlock(state.getAlignStartX() + 8, state.getHighwayY().intValue(), state.getAlignStartZ() - 8);
-                    default -> new GoalBlock(missingPos.getX(), state.getHighwayY().intValue(), missingPos.getZ());
+            if (state.isFlag5()) {
+                PlayerUtils.setAutoWalk(false);
+                MusheorSystem.debug("Found missing block, going back...");
+                assert nonObsidianBlock != null;
+                Goal goal = switch (HighwayBuilder.getDirection()) {
+                    case NORTH_EAST -> new GoalBlock(state.getCenterX() - 8, state.getCenterY(), state.getCenterZ() + 8);
+                    case NORTH_WEST -> new GoalBlock(state.getCenterX() + 8, state.getCenterY(), state.getCenterZ() + 8);
+                    case SOUTH_EAST -> new GoalBlock(state.getCenterX() - 8, state.getCenterY(), state.getCenterZ() - 8);
+                    case SOUTH_WEST -> new GoalBlock(state.getCenterX() + 8, state.getCenterY(), state.getCenterZ() - 8);
+                    default         -> new GoalBlock(nonObsidianBlock.getX(), state.getCenterY(), nonObsidianBlock.getZ());
                 };
-                PathingHelper.setBaritoneGoal((Goal) goal);
-                PathingHelper.startPathing();
+                PathingHelper.setGoal(goal);
                 return;
             }
         }
 
-        // Spleef-check diagonal floor positions before placing
-        BlockPos[] diagonalFloor = BlockPositions.getDiagonalFloorPositions(2, 2, HighwayBuilder.hasLeftWall(), HighwayBuilder.hasRightWall());
-        state.setPlacedFloor(false);
-        WorldUtils.detectAndHandleSpleef(diagonalFloor); // was: jOdDDFXSeWl4(BlockPos[])
-
-        // Build KekNuker queue for diagonal cross-section
-        if (((Boolean) HighwayBuilder.INSTANCE.enableNuker.get()).booleanValue()) {
-            KekNuker.nukerQueue.clear();
-            for (BlockPos pos : diagonalFloor) {
-                block = mc.world.getBlockState(pos).getBlock();
-                if (block == Blocks.NETHER_PORTAL || block instanceof AirBlock
-                        || !HighwayBuilder.allowLava() && block == Blocks.CRYING_OBSIDIAN
-                        || !WorldUtils.needsPlacement(pos, HighwayBuilder.getFloorBlock())) continue;
-                KekNuker.nukerQueue.add(pos.toImmutable());
+        BlockPos[] positions = BlockPositions.diagonalFloor(2, 2, HighwayBuilder.placeLeftRail(), HighwayBuilder.placeRightRail());
+        if (HighwayBuilder.INSTANCE.toggleKekNuker.get()) KekNuker.extraBreakQueue.clear();
+        state.setFlag6(false);
+        WorldUtils.spleefEntities(positions);
+        if (HighwayBuilder.INSTANCE.toggleKekNuker.get()) {
+            for (BlockPos pos : positions) {
+                Block block = mc.world.getBlockState(pos).getBlock();
+                if (block != Blocks.VOID_AIR && block != Blocks.BEDROCK
+                    && (HighwayBuilder.replaceCryingObsidian() || block != Blocks.RESPAWN_ANCHOR)
+                    && WorldUtils.shouldBreak(pos, HighwayBuilder.getFillBlock())) {
+                    KekNuker.extraBreakQueue.add(pos.toImmutable());
+                }
             }
-            for (BlockPos pos : BlockPositions.getDiagonalClearPositions(3, 0)) {
-                block = mc.world.getBlockState(pos).getBlock();
-                if (block == Blocks.NETHER_PORTAL || block instanceof AirBlock
-                        || !WorldUtils.needsPlacement(pos, Blocks.AIR)) continue;
-                KekNuker.nukerQueue.add(pos.toImmutable());
+            for (BlockPos pos : BlockPositions.diagonalTunnel(2, 1)) {
+                Block block = mc.world.getBlockState(pos).getBlock();
+                if (block != Blocks.VOID_AIR && block != Blocks.BEDROCK && WorldUtils.shouldBreak(pos, Blocks.AIR)) {
+                    KekNuker.extraBreakQueue.add(pos.toImmutable());
+                }
             }
         }
-
-        state.setPlacedFloor(false);
-        WorldUtils.tryPlaceBlocks((BlockPos[]) diagonalFloor, false);
-        BlockPos[] diagonalCeiling = BlockPositions.getDiagonalCeilingPositions(2, 1, HighwayBuilder.hasLeftWall(), HighwayBuilder.hasRightWall());
+        state.setFlag4(false);
+        WorldUtils.placeHighwayBlocks(positions, false);
+        BlockPos[] ceilingPositions = BlockPositions.diagonalCeiling(2, 1, HighwayBuilder.placeLeftRail(), HighwayBuilder.placeRightRail());
         if (HighwayBuilder.hasCeiling()) {
-            // Stop walking if any ceiling position is within range and can be placed
-            for (BlockPos pos : diagonalCeiling) {
-                if (!WorldUtils.isInPlacementRange(pos) || !BlockUtils.canPlace((BlockPos) pos, true)) continue; // was: KDNrzlU9qtrEv
-                PlayerUtils.setAutoWalkActive(false);
-            }
-            WorldUtils.tryPlaceBlocks((BlockPos[]) diagonalCeiling, false);
+            for (BlockPos pos : ceilingPositions)
+                if (WorldUtils.isWithinPlacementRange(pos) && BlockUtils.canPlace(pos, true)) PlayerUtils.setAutoWalk(false);
+            WorldUtils.placeHighwayBlocks(ceilingPositions, false);
         }
-
-        if (!(state.isFloorPlaced() && state.isCeilingPlaced() && state.foundMissingBlock()
-                && KekNuker.isNuking() && state.isObsidianReady())) {
-            PlayerUtils.setAutoWalkActive(true);
+        if (!state.isFlag4() || !state.isFlag3() || !state.isFlag5() || !KekNuker.isBusyInBuildZone() || !state.isFlag6()) {
+            PlayerUtils.setAutoWalk(true);
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Ice rail tick (cardinal)
-    // -------------------------------------------------------------------------
-
-    /**
-     * Tick handler for cardinal ice-highway building.
-     *
-     * Manages ice-floor placement using either the Scaffold or IceFloor strategy
-     * (controlled by HighwayBuilder.getScaffoldMode()):
-     *   - SCAFFOLD: places blocks from inventory
-     *   - ICE_FLOOR: uses WorldUtils.buildIceFloor()
-     *
-     * Also feeds KekNuker with obstructions in the clear zone,
-     * and detects the floating-gap pattern that requires Baritone re-alignment.
-     */
-    public static void handleIceRailTick() { // was: Z6nxChaWC9ymwoio
+    // ----------------------------------------------------------------------
+    // DIG — cardinal
+    // ----------------------------------------------------------------------
+    public static void digCardinal() { // was: rKbT3Ifwo()
         if (mc.player == null || mc.world == null) return;
         HighwayState state = HighwayState.getInstance();
-
-        if (PlayerUtils.isGatheringItem() || HighwayBuilder.isEating()
-                || InventoryManager.isBreakingShulker || HighwayBuilder.isWaiting()
-                || SourceRemover.isActive() && Modules.get().get("source-remover").isActive()) {
-            PlayerUtils.setAutoWalkActive(false);
+        if (PlayerUtils.isGatheringItem() || HighwayBuilder.isEating() || InventoryManager.isPending
+            || HighwayBuilder.isKillAuraAttacking()
+            || (SourceRemover.isRemoving() && Modules.get().get("source-remover").isActive())) {
+            PlayerUtils.setAutoWalk(false);
             return;
         }
+        if (mc.player.getY() < state.getCenterY()) PlayerUtils.setAutoWalk(false);
+        if (HighwayBuilder.advancedSourceFiller()) WorldUtils.handleLavaRemoval();
+        PlayerUtils.faceHighwayDirectionPitchDown();
+        PlayerUtils.strafeToCenterline();
+        WorldUtils.checkFrontCollision();
 
-        if (mc.player.getY() < (double) state.getHighwayY().intValue()) {
-            PlayerUtils.setAutoWalkActive(false);
-        }
-
-        if (HighwayBuilder.isCheckingSpleef()) {
-            WorldUtils.handleLavaRemoval(); // was: selaO6lwe7
-        }
-
-        PlayerUtils.alignLookToHighway();
-        PlayerUtils.applyStrafing();
-        WorldUtils.checkForwardCollisions();
-
-        // If using scaffold mode: ensure ice is in inventory, path to restock if needed
-        if (HighwayBuilder.getScaffoldMode() != HighwayBuilder.ScaffoldMode.ICE_FLOOR) {
-            if (InventoryManager.findItemSlot(HighwayBuilder.getIceItem().asItem()) == null) {
-                state.setRestockTarget(mc.player.getBlockPos());
-                WorldUtils.returnToHighway();
+        if (HighwayBuilder.getScaffoldMode() != HighwayBuilder.ScaffoldMode.NONE) {
+            if (InventoryManager.findItemStack(HighwayBuilder.getScaffoldBlock().asItem()) == null) {
+                state.setMissingMaterialGoalPos(mc.player.getBlockPos());
+                WorldUtils.findAndPickupItem(HighwayBuilder.getScaffoldBlock().asItem());
                 return;
             }
-            if (state.getRestockGoal() != null
-                    && InventoryManager.findItemSlot(HighwayBuilder.getIceItem().asItem()) != null) {
-                PathingHelper.setGoal(state.getRestockGoal());
+            if (state.getMissingMaterialGoalPos() != null && InventoryManager.findItemStack(HighwayBuilder.getScaffoldBlock().asItem()) != null) {
+                PathingHelper.gotoBlock(state.getMissingMaterialGoalPos());
             }
-            state.setRestockTarget(null);
-            if (PathingHelper.isAlreadyPathing()) return;
+            state.setMissingMaterialGoalPos(null);
+            if (PathingHelper.isPathing()) return;
+        }
+        if (HighwayBuilder.getScaffoldMode() == HighwayBuilder.ScaffoldMode.ADVANCED) {
+            WorldUtils.placeHighwayBlocks(BlockPositions.cardinalFloor(3, 2, HighwayBuilder.scaffoldLeftRail(), HighwayBuilder.scaffoldRightRail()), true);
+        }
+        if (HighwayBuilder.getScaffoldMode() == HighwayBuilder.ScaffoldMode.NORMAL) {
+            WorldUtils.fillWalkwayBelow();
         }
 
-        // Place ice scaffold or run IceFloor builder
-        if (HighwayBuilder.getScaffoldMode() == HighwayBuilder.ScaffoldMode.SCAFFOLD) {
-            WorldUtils.tryPlaceBlocks(
-                BlockPositions.getFloorPositions(3, 2, HighwayBuilder.hasLeftWall(), HighwayBuilder.hasRightWall()), true);
+        for (BlockPos currentPos : BlockPositions.cardinalTunnel(3, 1)) {
+            BlockState blockState = mc.world.getBlockState(currentPos);
+            if (!(blockState.getBlock() instanceof FluidBlock) && blockState.getBlock() != Blocks.VOID_AIR
+                && blockState.getBlock() != Blocks.BEDROCK && WorldUtils.shouldBreak(currentPos, Blocks.AIR)) {
+                KekNuker.extraBreakQueue.add(currentPos.toImmutable());
+            }
         }
-        if (HighwayBuilder.getScaffoldMode() == HighwayBuilder.ScaffoldMode.ICE_FLOOR) {
-            WorldUtils.buildIceFloor();
-        }
-
-        // Add obstructions in the clear zone to KekNuker's queue
-        for (BlockPos pos : BlockPositions.getClearPositions(3, 2)) {
-            BlockState blockState = mc.world.getBlockState(pos);
-            if (blockState.getBlock() instanceof AirBlock
-                    || blockState.getBlock() == Blocks.NETHER_PORTAL
-                    || blockState.getBlock() instanceof AirBlock
-                    || !WorldUtils.needsPlacement(pos, Blocks.AIR)) continue;
-            KekNuker.nukerQueue.add(pos.toImmutable());
-        }
-
-        // Detect forward gap: if a block in the passage is floating (no adjacent lava face),
-        // path to the gap using GoalXZ so the player walks up to it
-        for (BlockPos pos : BlockPositions.getForwardClearPositions()) {
-            if (!(mc.world.getBlockState(pos).getBlock() instanceof AirBlock)
-                    && StatsHandler.ticksWithoutBlock > 5) {
-                boolean hasAdjacentLava = false;
-                for (Direction dir : Direction.values()) {
-                    BlockPos neighbor = pos.offset(dir);
-                    FluidState fluidState = mc.world.getFluidState(neighbor);
-                    if (fluidState.getFluid() != Fluids.LAVA) continue;
-                    hasAdjacentLava = true;
-                    break;
+        for (BlockPos currentPos : BlockPositions.cardinalWallScan()) {
+            if (!(mc.world.getBlockState(currentPos).getBlock() instanceof FluidBlock) && StatsHandler.cachedDistance > 5) {
+                boolean hasLavaNeighbor = false;
+                for (Direction direction : Direction.values()) {
+                    if (mc.world.getFluidState(currentPos.offset(direction)).getFluid() == Fluids.LAVA) { hasLavaNeighbor = true; break; }
                 }
-                if (hasAdjacentLava) continue;
-                PlayerUtils.setAutoWalkActive(false);
-                GoalXZ goal = switch (HighwayBuilder.getDirection()) {
-                    case WorldUtils.Direction8.NORTH, WorldUtils.Direction8.SOUTH ->
-                        new GoalXZ(state.getAlignStartX().intValue(), pos.getZ());
-                    case WorldUtils.Direction8.WEST, WorldUtils.Direction8.EAST ->
-                        new GoalXZ(pos.getX(), state.getAlignStartZ().intValue());
-                    default ->
-                        new GoalXZ(pos.getX(), pos.getZ());
-                };
-                PathingHelper.setBaritoneGoal((Goal) goal);
-                PathingHelper.startPathing();
-                return;
+                if (!hasLavaNeighbor) {
+                    PlayerUtils.setAutoWalk(false);
+                    GoalXZ goal = switch (HighwayBuilder.getDirection()) {
+                        case NORTH, SOUTH -> new GoalXZ(state.getCenterX(), currentPos.getZ());
+                        case EAST, WEST   -> new GoalXZ(currentPos.getX(), state.getCenterZ());
+                        default           -> new GoalXZ(currentPos.getX(), currentPos.getZ());
+                    };
+                    PathingHelper.setGoal(goal);
+                    return;
+                }
+            } else {
+                PlayerUtils.setAutoWalk(true);
             }
-            PlayerUtils.setAutoWalkActive(true);
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Ice rail tick (diagonal)
-    // -------------------------------------------------------------------------
-
-    /**
-     * Tick handler for diagonal ice-highway building.
-     *
-     * Like handleIceRailTick() but uses diagonal BlockPositions methods.
-     * Additionally runs placeSafetyBlock() to prevent the player falling off
-     * the diagonal edge during construction.
-     */
-    public static void handleDiagonalIceRailTick() { // was: AoH6MX
+    // ----------------------------------------------------------------------
+    // DIG — diagonal
+    // ----------------------------------------------------------------------
+    public static void digDiagonal() { // was: r7hOYIKN2()
         if (mc.player == null || mc.world == null) return;
         HighwayState state = HighwayState.getInstance();
-
-        if (state.getDiagonalCenter() == null) {
+        if (state.getCenterPos() == null) {
             ChatUtils.error("Set player center using .center", new Object[0]);
-            PlayerUtils.disableHighwayBuilder();
+            PlayerUtils.toggleHighwayBuilder();
             return;
         }
-
-        // Track diagonal alignment
-        double dx = mc.player.getX() - state.getDiagonalCenter().getX();
-        double dz = mc.player.getZ() - state.getDiagonalCenter().getZ();
+        double dx = mc.player.getBlockX() - state.getCenterPos().getX();
+        double dz = mc.player.getBlockZ() - state.getCenterPos().getZ();
         if (Math.abs(dx) == Math.abs(dz)) {
-            state.setAlignX(mc.player.getX());
-            state.setAlignZ(mc.player.getZ());
+            state.setCenterX(mc.player.getBlockX());
+            state.setCenterZ(mc.player.getBlockZ());
         }
-
         List<Block> nukerBlacklist = KekNuker.getBlacklist();
-
-        LinkedHashMap<String, Boolean> pauseReasons = new LinkedHashMap<String, Boolean>();
-        pauseReasons.put("Gathering Items", PlayerUtils.isGatheringItem());
-        pauseReasons.put("Removing Lava",   SourceRemover.isActive());
-        pauseReasons.put("Eating",          HighwayBuilder.isEating());
-
-        if (HighwayBuilder.isEating() || PlayerUtils.isGatheringItem()
-                || SourceRemover.isActive() || HighwayBuilder.isWaiting()) {
-            PlayerUtils.setAutoWalkActive(false);
-            for (Map.Entry entry : pauseReasons.entrySet()) {
-                if (!((Boolean) entry.getValue()).booleanValue()) continue;
-                MusheorSystem.debug((String) entry.getKey() + " was triggered.", new Object[0]);
-            }
+        Map<String, Boolean> conditions = new LinkedHashMap<>();
+        conditions.put("Gathering Items", PlayerUtils.isGatheringItem());
+        conditions.put("Removing Lava", SourceRemover.isRemoving());
+        conditions.put("Eating", HighwayBuilder.isEating());
+        if (HighwayBuilder.isEating() || PlayerUtils.isGatheringItem() || SourceRemover.isRemoving() || HighwayBuilder.isKillAuraAttacking()) {
+            PlayerUtils.setAutoWalk(false);
+            for (Map.Entry<String, Boolean> entry : conditions.entrySet())
+                if (entry.getValue()) MusheorSystem.debug(entry.getKey() + " was triggered.");
             return;
         }
+        if (HighwayBuilder.advancedSourceFiller()) WorldUtils.handleLavaRemoval();
+        PlayerUtils.faceHighwayDirectionPitchDown();
+        PlayerUtils.alignToHighway();
+        WorldUtils.checkFrontCollision();
 
-        if (HighwayBuilder.isCheckingSpleef()) {
-            WorldUtils.handleLavaRemoval(); // was: selaO6lwe7
+        if (HighwayBuilder.getScaffoldMode() == HighwayBuilder.ScaffoldMode.ADVANCED) {
+            if (InventoryManager.findItemStack(Items.NETHERRACK) == null) WorldUtils.findAndPickupItem(Items.NETHERRACK); // was: class_1802.field_8328 (NETHERRACK)
+            WorldUtils.placeHighwayBlocks(BlockPositions.diagonalFloor(2, 1, HighwayBuilder.placeLeftRail(), HighwayBuilder.placeRightRail()), true);
+        }
+        if (HighwayBuilder.getScaffoldMode() == HighwayBuilder.ScaffoldMode.NORMAL) {
+            if (InventoryManager.findItemStack(Items.NETHERRACK) == null) WorldUtils.findAndPickupItem(Items.NETHERRACK); // was: class_1802.field_8328 (NETHERRACK)
+            WorldUtils.fillWalkwayBelow();
         }
 
-        PlayerUtils.alignLookToHighway();
-        PlayerUtils.alignWithBaritone();
-        WorldUtils.checkForwardCollisions();
-
-        // Scaffold mode: ensure netherrack is in inventory
-        if (HighwayBuilder.getScaffoldMode() == HighwayBuilder.ScaffoldMode.SCAFFOLD) {
-            if (InventoryManager.findItemSlot(Items.NETHERRACK) == null) {
-                WorldUtils.returnToHighway();
-            }
-            WorldUtils.tryPlaceBlocks(
-                BlockPositions.getDiagonalFloorPositions(2, 1, HighwayBuilder.hasLeftWall(), HighwayBuilder.hasRightWall()), true);
-        }
-        if (HighwayBuilder.getScaffoldMode() == HighwayBuilder.ScaffoldMode.ICE_FLOOR) {
-            if (InventoryManager.findItemSlot(Items.NETHERRACK) == null) {
-                WorldUtils.returnToHighway();
-            }
-            WorldUtils.buildIceFloor();
-        }
-
-        if (KekNuker.isNuking()) return;
-
-        // Safety: place a block so the player doesn't fall off the diagonal edge
-        if (WorldUtils.placeSafetyBlock()) {
-            MusheorSystem.debug("Placing block so player doesn't fall...", new Object[0]);
-            PlayerUtils.setAutoWalkActive(false);
-            return;
-        }
-
-        // Add clear-zone obstructions to KekNuker
-        for (BlockPos pos : BlockPositions.getDiagonalClearPositions(3, 2)) {
-            BlockState blockState = mc.world.getBlockState(pos);
-            if (blockState.getBlock() instanceof AirBlock
-                    || blockState.getBlock() == Blocks.NETHER_PORTAL
-                    || blockState.getBlock() instanceof AirBlock
-                    || !WorldUtils.needsPlacement(pos, Blocks.AIR)) continue;
-            KekNuker.nukerQueue.add(pos.toImmutable());
-        }
-
-        // Detect obstacle behind player in the diagonal passage zone
-        for (BlockPos pos : BlockPositions.getDiagonalClearPositions(-3, 5)) {
-            if (!(mc.world.getBlockState(pos).getBlock() instanceof AirBlock)
-                    && StatsHandler.ticksWithoutBlock > 5) {
-                boolean hasAdjacentLava = false;
-                for (Direction dir : Direction.values()) {
-                    BlockPos neighbor = pos.offset(dir);
-                    FluidState fluidState = mc.world.getFluidState(neighbor);
-                    if (fluidState.getFluid() != Fluids.LAVA) continue;
-                    hasAdjacentLava = true;
-                    break;
+        if (!KekNuker.isBusyInBuildZone()) {
+            if (WorldUtils.placeDiagonalSupport()) {
+                MusheorSystem.debug("Placing block so player doesn't fall...");
+                PlayerUtils.setAutoWalk(false);
+            } else {
+                for (BlockPos currentPos : BlockPositions.diagonalTunnel(3, 1)) {
+                    BlockState blockState = mc.world.getBlockState(currentPos);
+                    if (!(blockState.getBlock() instanceof FluidBlock) && blockState.getBlock() != Blocks.VOID_AIR
+                        && blockState.getBlock() != Blocks.BEDROCK && WorldUtils.shouldBreak(currentPos, Blocks.AIR)) {
+                        KekNuker.extraBreakQueue.add(currentPos.toImmutable());
+                    }
                 }
-                if (hasAdjacentLava || nukerBlacklist.contains(mc.world.getBlockState(pos).getBlock())) continue;
-                MusheorSystem.debug("Detected obstruction behind player... "
-                    + Registries.BLOCK.getId(mc.world.getBlockState(pos).getBlock()).getPath()
-                    + "at %s %s %s",
-                    pos.getX(), pos.getY(), pos.getZ());
-                PlayerUtils.setAutoWalkActive(false);
-                PathingHelper.setBaritoneGoal((Goal) new GoalXZ(pos.getX(), pos.getX()));
-                PathingHelper.startPathing();
-                return;
+                for (BlockPos currentPos : BlockPositions.diagonalTunnel(-2, 5)) {
+                    if (!(mc.world.getBlockState(currentPos).getBlock() instanceof FluidBlock) && StatsHandler.cachedDistance > 5) {
+                        boolean hasLavaNeighbor = false;
+                        for (Direction direction : Direction.values()) {
+                            if (mc.world.getFluidState(currentPos.offset(direction)).getFluid() == Fluids.LAVA) { hasLavaNeighbor = true; break; }
+                        }
+                        if (!hasLavaNeighbor && !nukerBlacklist.contains(mc.world.getBlockState(currentPos).getBlock())) {
+                            MusheorSystem.debug("Detected obstruction behind player... "
+                                + Registries.BLOCK.getId(mc.world.getBlockState(currentPos).getBlock()).getPath() + "at %s %s %s",
+                                currentPos.getX(), currentPos.getY(), currentPos.getZ());
+                            PlayerUtils.setAutoWalk(false);
+                            PathingHelper.setGoal(new GoalXZ(currentPos.getX(), currentPos.getX()));
+                            return;
+                        }
+                    } else {
+                        PlayerUtils.setAutoWalk(true);
+                    }
+                }
             }
-            PlayerUtils.setAutoWalkActive(true);
+        }
+    }
+
+    // ----------------------------------------------------------------------
+    // Ring/diamond corner turning
+    // ----------------------------------------------------------------------
+    /** True once the player has travelled past the end of the current ring/diamond leg. */
+    private static boolean reachedRingCorner(HighwayLocator.Checkpoint d, int px, int pz) { // was: FvaNWO(Checkpoint,int,int)
+        double D = Math.abs(d.axisValue);
+        double K = d.axisValue;
+        return switch (d.direction) {
+            case NORTH -> pz <= -D + 2.0;
+            case EAST  -> px >= D - 2.0;
+            case SOUTH -> pz >= D - 2.0;
+            case WEST  -> px <= -D + 2.0;
+            case NORTH_EAST -> K > 0.0 ? pz <= 2 : px >= -2;
+            case NORTH_WEST -> K > 0.0 ? px <= 2 : pz <= 2;
+            case SOUTH_EAST -> K > 0.0 ? pz >= -2 : px >= -2;
+            case SOUTH_WEST -> K > 0.0 ? px <= 2 : pz >= -2;
+        };
+    }
+
+    /** Returns the {x, z} corner coordinate where the current leg meets the next. */
+    private static int[] getRingCorner(HighwayLocator.Checkpoint d) { // was: FvaNWO(Checkpoint)
+        int D = (int) Math.abs(d.axisValue);
+        int K = (int) d.axisValue;
+        int ax = (int) d.axisValue;
+        return switch (d.direction) {
+            case NORTH -> new int[]{ax, -D};
+            case EAST  -> new int[]{D, ax};
+            case SOUTH -> new int[]{ax, D};
+            case WEST  -> new int[]{-D, ax};
+            case NORTH_EAST -> K > 0 ? new int[]{K, 0} : new int[]{0, K};
+            case NORTH_WEST -> K > 0 ? new int[]{0, -K} : new int[]{K, 0};
+            case SOUTH_EAST -> K > 0 ? new int[]{K, 0} : new int[]{0, -K};
+            case SOUTH_WEST -> K > 0 ? new int[]{0, K} : new int[]{K, 0};
+        };
+    }
+
+    /** Direction of the next leg after turning a ring/diamond corner. */
+    private static WorldUtils.Direction8 getNextLegDirection(HighwayLocator.Checkpoint d) { // was: Q90GLXQ0Pef(Checkpoint)
+        boolean pos = d.axisValue > 0.0;
+        return switch (d.direction) {
+            case NORTH, SOUTH -> pos ? WorldUtils.Direction8.WEST : WorldUtils.Direction8.EAST;
+            case EAST, WEST   -> pos ? WorldUtils.Direction8.NORTH : WorldUtils.Direction8.SOUTH;
+            case NORTH_EAST, SOUTH_WEST -> pos ? WorldUtils.Direction8.NORTH_WEST : WorldUtils.Direction8.SOUTH_EAST;
+            case NORTH_WEST, SOUTH_EAST -> pos ? WorldUtils.Direction8.SOUTH_WEST : WorldUtils.Direction8.NORTH_EAST;
+        };
+    }
+
+    /** Handles pathing to and turning at a ring/diamond corner. Returns true if handling a turn. */
+    private static boolean handleRingTurn(HighwayLocator.Checkpoint detected, HighwayState state) { // was: FvaNWO(Checkpoint,HighwayState)
+        assert mc.player != null;
+        int px = mc.player.getBlockX();
+        int pz = mc.player.getBlockZ();
+        if (state.getCenterY() == null) return false;
+        int py = state.getCenterY();
+        if (!reachedRingCorner(detected, px, pz)) return false;
+        int[] corner = getRingCorner(detected);
+        if (corner == null) return false;
+        int cx = corner[0], cz = corner[1];
+        double dist = Math.hypot(px - cx, pz - cz);
+        if (dist > 1.0) {
+            PlayerUtils.setAutoWalk(false);
+            PathingHelper.setGoal(new GoalBlock(cx, py, cz));
+            return true;
+        }
+        WorldUtils.Direction8 nextDir = getNextLegDirection(detected);
+        if (nextDir == null) return false;
+        HighwayLocator.Checkpoint newDetected = HighwayLocator.locateNearest(mc.player.getBlockX(), mc.player.getBlockZ(), py, nextDir);
+        if (newDetected == null) return false;
+        state.setCurrentCheckpoint(newDetected);
+        state.setDirection(newDetected.direction);
+        state.setStartX(newDetected.startX);
+        state.setStartZ(newDetected.startZ);
+        state.setLastX(newDetected.alignX);
+        state.setLastZ(newDetected.alignZ);
+        state.setCenterX(mc.player.getBlockX());
+        state.setCenterZ(mc.player.getBlockZ());
+        PlayerUtils.faceHighwayDirectionPitchDown();
+        return true;
+    }
+
+    public static boolean isBouncing() { return bouncing; } // was: oZHMlTL()
+
+    // ----------------------------------------------------------------------
+    // Elytra bounce management
+    // ----------------------------------------------------------------------
+    /** True if the floor+tunnel ahead (out to {@code distance}) is already clear. */
+    private static boolean isPathClearAhead(boolean isCardinal, int distance) { // was: FvaNWO(boolean,int)
+        if (mc.world == null) return false;
+        List<Block> blacklist = KekNuker.getBlacklist();
+        BlockPos[] floor = isCardinal
+            ? BlockPositions.cardinalFloor(distance, 1, HighwayBuilder.placeLeftRail(), HighwayBuilder.placeRightRail())
+            : BlockPositions.diagonalFloor(distance, 1, HighwayBuilder.placeLeftRail(), HighwayBuilder.placeRightRail());
+        for (BlockPos pos : floor) {
+            Block block = mc.world.getBlockState(pos).getBlock();
+            if (!blacklist.contains(block) && (HighwayBuilder.replaceCryingObsidian() || block != Blocks.RESPAWN_ANCHOR)
+                && block != Blocks.BEDROCK && block != HighwayBuilder.getFillBlock()) {
+                return false;
+            }
+        }
+        BlockPos[] tunnel = isCardinal ? BlockPositions.cardinalTunnel(distance, 1) : BlockPositions.diagonalTunnel(distance, 1);
+        for (BlockPos pos : tunnel) {
+            Block block = mc.world.getBlockState(pos).getBlock();
+            if (!blacklist.contains(block) && block != Blocks.BEDROCK && block != Blocks.VOID_AIR
+                && !mc.world.getBlockState(pos).isAir()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** True if the player is within {@code m}=32 blocks of the current leg's end. */
+    private static boolean isNearLegEnd(HighwayLocator.Checkpoint d) { // was: psJq59YIbp3Z(Checkpoint)
+        if (mc.player == null) return false;
+        int px = mc.player.getBlockX();
+        int pz = mc.player.getBlockZ();
+        double D = Math.abs(d.axisValue);
+        double K = d.axisValue;
+        int m = SCAN_32;
+        return switch (d.direction) {
+            case NORTH -> pz <= -D + m;
+            case EAST  -> px >= D - m;
+            case SOUTH -> pz >= D - m;
+            case WEST  -> px <= -D + m;
+            case NORTH_EAST -> K > 0.0 ? pz <= m : px >= -m;
+            case NORTH_WEST -> K > 0.0 ? px <= m : pz <= m;
+            case SOUTH_EAST -> K > 0.0 ? pz >= -m : px >= -m;
+            case SOUTH_WEST -> K > 0.0 ? px <= m : pz >= -m;
+        };
+    }
+
+    private static void configureBounce() { // was: krxNb5lcQuWA()
+        PlayerUtils.setModuleSetting(KekBounce.class, "mode", KekBounce.Mode.SIMPLE);
+        PlayerUtils.setModuleSetting(KekBounce.class, "y-motion", false);
+        PlayerUtils.setModuleSetting(KekBounce.class, "simple-obstacle-passer", true);
+        if (mc.player != null) PlayerUtils.setModuleSetting(KekBounce.class, "y-level", mc.player.getBlockY());
+    }
+
+    /** Enables the elytra bounce (only if the player has an elytra). */
+    private static void startBounce() { // was: nt0HZnvBBp()
+        if (bouncing || mc.player == null) return;
+        boolean hasElytra = false;
+        for (int i = 0; i < mc.player.getInventory().size(); i++) {
+            if (mc.player.getInventory().getStack(i).getItem() == Items.ELYTRA) { hasElytra = true; break; }
+        }
+        if (hasElytra) {
+            configureBounce();
+            Module kekBounce = Modules.get().get(KekBounce.class);
+            if (!kekBounce.isActive()) kekBounce.toggle();
+            bouncing = true;
+            bounceCooldownTicks = 0;
+        }
+    }
+
+    /** Disables the elytra bounce and starts the cooldown. */
+    public static void stopBounce() { // was: xQr5FhbwpQPWgIQ()
+        if (bouncing) {
+            Module kekBounce = Modules.get().get(KekBounce.class);
+            if (kekBounce.isActive()) kekBounce.toggle();
+            bouncing = false;
+            bounceCooldownTicks = BOUNCE_COOLDOWN;
+        }
+    }
+
+    /** Resets all bounce/fall-recovery state (called on deactivate). */
+    public static void reset() { // was: OMMZL1F3q()
+        bouncing = false;
+        bounceCooldownTicks = 0;
+        fellOff = false;
+        offHighwayTicks = 0;
+        repathTicks = 0;
+    }
+
+    // ----------------------------------------------------------------------
+    // Fall recovery
+    // ----------------------------------------------------------------------
+    /** If the player fell off the highway, paths back to it. Returns true while recovering. */
+    public static boolean handleFallRecovery(HighwayState state) { // was: FvaNWO(HighwayState)
+        if (mc.player == null || mc.world == null) return false;
+        if (state.getCenterY() == null || state.getDirection() == null) return false;
+        Module echestFarmer = Modules.get().get(EchestFarmer.class);
+        if (echestFarmer.isActive() || PlayerUtils.isGatheringItem() || SourceRemover.isRemoving() || InventoryManager.isPending
+            || state.isFlag2() || state.isFlag7() || state.isFlag8() || state.isFlag9() || state.isFlag10()) {
+            offHighwayTicks = 0;
+            fellOff = false;
+            return false;
+        }
+        if ((bouncing || bounceCooldownTicks > 0) && !fellOff) {
+            offHighwayTicks = 0;
+            return false;
+        }
+        int targetY = state.getCenterY();
+        boolean atCorrectY = mc.player.getBlockY() == targetY;
+        if (!fellOff) {
+            if (atCorrectY) { offHighwayTicks = 0; return false; }
+            if (++offHighwayTicks < FALL_GRACE) return false;
+            fellOff = true;
+            repathTicks = 0;
+            stopBounce();
+            PlayerUtils.setAutoWalk(false);
+            MusheorSystem.debug("Fell off the highway (Y %s != %s) — pathing back...", mc.player.getBlockY(), targetY);
+        }
+        if (atCorrectY && mc.player.isOnGround()) {
+            fellOff = false;
+            offHighwayTicks = 0;
+            if (PathingHelper.isPathing()) PathingHelper.cancelEverything();
+            MusheorSystem.debug("Back on the highway — resuming paving.");
+            return false;
+        } else {
+            if (repathTicks <= 0) { pathBackToHighway(state, targetY); repathTicks = REPATH_INTERVAL; }
+            else repathTicks--;
+            return true;
+        }
+    }
+
+    private static void pathBackToHighway(HighwayState state, int targetY) { // was: FvaNWO(HighwayState,int)
+        BlockPos nearest = findNearestStandable(targetY, RECOVERY_RANGE);
+        if (nearest != null) {
+            PathingHelper.setGoal(new GoalBlock(nearest));
+        } else if (state.getCenterX() != null && state.getCenterZ() != null) {
+            PathingHelper.setGoal(new GoalBlock(state.getCenterX(), targetY, state.getCenterZ()));
+        }
+    }
+
+    /** Finds the nearest standable spot on the pavement at {@code targetY} within {@code range}. */
+    private static BlockPos findNearestStandable(int targetY, int range) { // was: FvaNWO(int,int)
+        if (mc.player == null || mc.world == null) return null;
+        BlockPos p = mc.player.getBlockPos();
+        Block pavement = HighwayBuilder.getFillBlock();
+        BlockPos best = null;
+        double bestDistSq = Double.MAX_VALUE;
+        for (int x = -range; x <= range; x++) {
+            for (int z = -range; z <= range; z++) {
+                BlockPos stand = new BlockPos(p.getX() + x, targetY, p.getZ() + z);
+                if (mc.world.getBlockState(stand.down()).getBlock() == pavement
+                    && mc.world.getBlockState(stand).isAir() && mc.world.getBlockState(stand.up()).isAir()) {
+                    double distSq = p.getSquaredDistance(stand);
+                    if (distSq < bestDistSq) { bestDistSq = distSq; best = stand; }
+                }
+            }
+        }
+        return best;
+    }
+
+    // ----------------------------------------------------------------------
+    // AUTO mode — combined loop (detects highway, follows rings/diamonds, paves+digs)
+    // ----------------------------------------------------------------------
+    public static void runAutoBuild() { // was: zu3a44xDeMFMCRwm()
+        assert mc.player != null && mc.world != null;
+        HighwayState state = HighwayState.getInstance();
+        if (state.getCenterY() == null || state.getDirection() == null) return;
+        HighwayLocator.Checkpoint detected = state.getCurrentCheckpoint();
+        if (detected == null) return;
+        if (handleFallRecovery(state)) return;
+
+        boolean isCardinal = detected.type == HighwayBuilder.HighwayType.CARDINAL;
+        boolean isRingOrDiamond = detected.category == HighwayLocator.Category.RING || detected.category == HighwayLocator.Category.DIAMOND;
+        if (isRingOrDiamond && handleRingTurn(detected, state)) stopBounce();
+
+        Module echestFarmer = Modules.get().get(EchestFarmer.class);
+        if (echestFarmer.isActive() || PlayerUtils.isGatheringItem() || SourceRemover.isRemoving()) {
+            stopBounce();
+            PlayerUtils.setAutoWalk(false);
+            return;
+        }
+        if (KekNuker.isBusyInBuildZone() || HighwayBuilder.isEating() || HighwayBuilder.isKillAuraAttacking() || InventoryManager.isPending) {
+            stopBounce();
+            PlayerUtils.setAutoWalk(false);
+        }
+        if (HighwayBuilder.advancedSourceFiller()) WorldUtils.handleLavaRemoval();
+
+        if (HighwayBuilder.isAutoBounceEnabled()) {
+            if (bounceCooldownTicks > 0) { bounceCooldownTicks--; return; }
+            boolean nearLegEnd = isRingOrDiamond && isNearLegEnd(detected);
+            boolean interrupted = KekNuker.isBusyInBuildZone() || HighwayBuilder.isEating() || HighwayBuilder.isKillAuraAttacking()
+                || InventoryManager.isPending || PlayerUtils.isGatheringItem() || SourceRemover.isRemoving()
+                || echestFarmer.isActive() || PathingHelper.isPathing();
+            if (!nearLegEnd && !interrupted && isPathClearAhead(isCardinal, HighwayBuilder.getBounceDistanceCheck())) startBounce();
+            else stopBounce();
+            if (bouncing) { PlayerUtils.faceHighwayDirection(); return; }
+        }
+
+        if (isCardinal) {
+            WorldUtils.checkFrontCollision();
+            PlayerUtils.faceHighwayDirectionPitchDown();
+            PlayerUtils.strafeToCenterline();
+        } else {
+            boolean isNESW = state.getDirection() == WorldUtils.Direction8.NORTH_EAST || state.getDirection() == WorldUtils.Direction8.SOUTH_WEST;
+            int playerDiagVal = isNESW ? mc.player.getBlockX() + mc.player.getBlockZ() : mc.player.getBlockX() - mc.player.getBlockZ();
+            if (playerDiagVal == (int) detected.axisValue) {
+                state.setCenterX(mc.player.getBlockX());
+                state.setCenterZ(mc.player.getBlockZ());
+            }
+            PlayerUtils.alignToHighway();
+            WorldUtils.checkFrontCollision();
+            PlayerUtils.faceHighwayDirectionPitchDown();
+        }
+
+        BlockPos[] allPositions = isCardinal
+            ? BlockPositions.cardinalFloor(3, 2, HighwayBuilder.placeLeftRail(), HighwayBuilder.placeRightRail())
+            : BlockPositions.diagonalFloor(2, 2, HighwayBuilder.placeLeftRail(), HighwayBuilder.placeRightRail());
+        List<BlockPos> placePositions = new ArrayList<>();
+        List<BlockPos> clearPositions = new ArrayList<>();
+        for (BlockPos pos : allPositions) {
+            if (pos.getY() != state.getCenterY() || !HighwayLocator.isRailOnAnyHighway(pos, detected)) placePositions.add(pos);
+            else if (HighwayLocator.isOnDetectedHighway(pos, detected)) clearPositions.add(pos);
+        }
+        if (HighwayBuilder.INSTANCE.toggleKekNuker.get()) KekNuker.extraBreakQueue.clear();
+
+        state.setFlag6(false);
+        WorldUtils.spleefEntities(allPositions);
+        if (HighwayBuilder.INSTANCE.toggleKekNuker.get()) {
+            for (BlockPos pos : placePositions) {
+                Block block = mc.world.getBlockState(pos).getBlock();
+                if (block != Blocks.VOID_AIR && block != Blocks.BEDROCK
+                    && (HighwayBuilder.replaceCryingObsidian() || block != Blocks.RESPAWN_ANCHOR)
+                    && WorldUtils.shouldBreak(pos, HighwayBuilder.getFillBlock())) {
+                    KekNuker.extraBreakQueue.add(pos.toImmutable());
+                }
+            }
+            BlockPos[] tunnelClear = isCardinal ? BlockPositions.cardinalTunnel(3, 1) : BlockPositions.diagonalTunnel(2, 1);
+            for (BlockPos pos : tunnelClear) {
+                Block block = mc.world.getBlockState(pos).getBlock();
+                if (block != Blocks.VOID_AIR && block != Blocks.BEDROCK && WorldUtils.shouldBreak(pos, Blocks.AIR))
+                    KekNuker.extraBreakQueue.add(pos.toImmutable());
+            }
+            for (BlockPos pos : clearPositions) {
+                Block block = mc.world.getBlockState(pos).getBlock();
+                if (block != Blocks.VOID_AIR && block != Blocks.BEDROCK && WorldUtils.shouldBreak(pos, Blocks.AIR))
+                    KekNuker.extraBreakQueue.add(pos.toImmutable());
+            }
+        }
+        state.setFlag4(false);
+        WorldUtils.placeHighwayBlocks(placePositions.toArray(new BlockPos[0]), false);
+        if (HighwayBuilder.hasCeiling()) {
+            BlockPos[] ceilingPositions = isCardinal
+                ? BlockPositions.cardinalCeiling(2, 2, HighwayBuilder.placeLeftRail(), HighwayBuilder.placeRightRail())
+                : BlockPositions.diagonalCeiling(2, 1, HighwayBuilder.placeLeftRail(), HighwayBuilder.placeRightRail());
+            WorldUtils.placeHighwayBlocks(ceilingPositions, false);
+        }
+        if (!state.isFlag4() || !state.isFlag3() || !WorldUtils.needsPlacement() || !state.isFlag5() || !KekNuker.isBusyInBuildZone() || !state.isFlag6()) {
+            PlayerUtils.setAutoWalk(true);
         }
     }
 }

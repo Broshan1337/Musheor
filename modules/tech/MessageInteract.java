@@ -1,10 +1,11 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// Class name was already readable; internal members were obfuscated.
 package musheor.modules.tech;
 
-import baritone.api.pathing.goals.Goal;
 import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.pathing.goals.GoalNear;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.regex.Matcher;
@@ -19,219 +20,201 @@ import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.settings.StringSetting;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
-import meteordevelopment.meteorclient.utils.Utils;
+import meteordevelopment.meteorclient.utils.player.Rotations;
 import meteordevelopment.orbit.EventHandler;
-import musheor.compat.VersionHelper;
-import musheor.modules.features.MoreTags;
 import musheor.musheor;
-import musheor.utils.InventoryManager;
+import musheor.compat.VersionHelper;
+import musheor.modules.automation.InventoryManager;
+import musheor.modules.features.MoreTags;
 import musheor.utils.PearlStore;
 import musheor.utils.WorldUtils;
 import musheor.utils.internal.PathingHelper;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.LivingEntity;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.block.TrapdoorBlock;
+import net.minecraft.entity.projectile.EnderPearlEntity;
 import net.minecraft.item.Items;
+import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
-import net.minecraft.entity.player.PlayerAbilities;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.block.EnderChestBlock;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.util.hit.BlockHitResult;
 
-public class MessageInteract
-extends Module {
-    private static final MinecraftClient mc = MinecraftClient.getInstance();
-    private final SettingGroup sgGeneral;
-    private final Setting<Action> action;
-    private final Setting<BlockPos> position;
-    private final Setting<Boolean> dropPearl;
-    private final Setting<Boolean> returnToStartPos;
-    private final Setting<String> PlayerIGN;
-    boolean isTeleporting;
-    int interactDelayTicks;
-    private BlockPos pearlTrapdoorPos;
-    private BlockPos startPos;
-    private static final Pattern WHISPER_PATTERN = Pattern.compile("([A-Za-z0-9_]{3,16}) whispers: ");
-    private static final Random RANDOM = new Random();
+/**
+ * "message-interact" — reacts to "!tp" whispers from a (optionally restricted) player by
+ * interacting with, attacking, or loading a stasis pearl at a resolved position. For pearl
+ * loading it finds the sender's tracked pearl (from {@link MoreTags} live tags or the
+ * persisted {@link PearlStore}), Baritone-paths to it, opens the trapdoor, optionally drops
+ * a replacement pearl, and paths back to the start. Replies over /msg with a random token.
+ */
+public class MessageInteract extends Module {
+    private static final MinecraftClient mc = MinecraftClient.getInstance(); // was: psJq59YIbp3Z
+    private final SettingGroup sgGeneral = this.settings.getDefaultGroup();   // was: SOYyh5IPg26f7F
+
+    private final Setting<Action> action = sgGeneral.add(new EnumSetting.Builder<Action>() // was: rKbT3Ifwo
+        .name("action").description("What kind of action to perform.").defaultValue(Action.INTERACT).build());
+    private final Setting<BlockPos> position = sgGeneral.add(new BlockPosSetting.Builder() // was: r7hOYIKN2
+        .name("position").description("What block position the action is supposed to be for").defaultValue(new BlockPos(0, 0, 0))
+        .visible(() -> action.get() != Action.LOAD_PEARL).build());
+    private final Setting<Boolean> dropPearl = sgGeneral.add(new BoolSetting.Builder() // was: oZHMlTL
+        .name("drop-pearl").description("Drops a pearl after performing the interaction").defaultValue(true).visible(() -> action.get() == Action.LOAD_PEARL).build());
+    private final Setting<Boolean> returnToStart = sgGeneral.add(new BoolSetting.Builder() // was: xQr5FhbwpQPWgIQ
+        .name("return-to-start-pos").description("Pathfinds back to your starting position.").defaultValue(true).visible(() -> action.get() == Action.LOAD_PEARL).build());
+    private final Setting<String> allowedPlayer = sgGeneral.add(new StringSetting.Builder() // was: OMMZL1F3q
+        .name("allowed-player").description("If set, only reacts to !tp whispers from this player. Leave empty to allow anyone.").defaultValue("").build());
+
+    boolean active = false;          // was: FvaNWO (an action is in progress)
+    int interactDelay = 0;           // was: Q90GLXQ0Pef (post-open trapdoor delay)
+    private int rotationTicks = 0;   // was: zu3a44xDeMFMCRwm
+    private BlockPos pearlPos = null; // was: krxNb5lcQuWA (resolved trapdoor for LOAD_PEARL)
+    private BlockPos startPos = null; // was: nt0HZnvBBp
+    private static final Pattern WHISPER_PATTERN = Pattern.compile("([A-Za-z0-9_]{3,16}) whispers: "); // was: amz3UB1vE
+    private static final Random RANDOM = new Random(); // was: sBBIyQG5NWq0K
 
     public MessageInteract() {
         super(musheor.MAIN, "message-interact", "Performs a certain action upon receiving a message from a specific player.");
-        this.sgGeneral = this.settings.getDefaultGroup();
-        this.action = this.sgGeneral.add((Setting)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)new EnumSetting.Builder().name("action")).description("What kind of action to perform.")).defaultValue((Object)Action.RightClick)).build());
-        this.position = this.sgGeneral.add((Setting)((BlockPosSetting.Builder)((BlockPosSetting.Builder)((BlockPosSetting.Builder)((BlockPosSetting.Builder)new BlockPosSetting.Builder().name("position")).description("What block position the action is supposed to be for")).defaultValue((Object)new BlockPos(0, 0, 0))).visible(() -> this.action.get() != Action.PearlTeleport)).build());
-        this.dropPearl = this.sgGeneral.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("drop-pearl")).description("Drops a pearl after performing the interaction")).defaultValue((Object)true)).visible(() -> this.action.get() == Action.PearlTeleport)).build());
-        this.returnToStartPos = this.sgGeneral.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("return-to-start-pos")).description("Pathfinds back to your starting position.")).defaultValue((Object)true)).visible(() -> this.action.get() == Action.PearlTeleport)).build());
-        this.PlayerIGN = this.sgGeneral.add((Setting)((StringSetting.Builder)((StringSetting.Builder)((StringSetting.Builder)new StringSetting.Builder().name("allowed-player")).description("If set, only reacts to !tp whispers from this player. Leave empty to allow anyone.")).defaultValue((Object)"")).build());
-        this.isTeleporting = false;
-        this.interactDelayTicks = 0;
-        this.pearlTrapdoorPos = null;
-        this.startPos = null;
     }
 
+    @Override
     public void onDeactivate() {
-        PathingHelper.stopPathing();
-        this.isTeleporting = false;
-        this.interactDelayTicks = 0;
-        this.pearlTrapdoorPos = null;
+        PathingHelper.cancelEverything();
+        this.active = false;
+        this.interactDelay = 0;
+        this.rotationTicks = 0;
+        this.pearlPos = null;
         this.startPos = null;
     }
 
+    @Override
     public void onActivate() {
-        if (this.action.get() == Action.PearlTeleport && !((MoreTags)Modules.get().get(MoreTags.class)).isActive()) {
-            ((MoreTags)Modules.get().get(MoreTags.class)).toggle();
+        if (this.action.get() == Action.LOAD_PEARL && !((MoreTags) Modules.get().get(MoreTags.class)).isActive()) {
+            ((MoreTags) Modules.get().get(MoreTags.class)).toggle();
         }
     }
 
-    private BlockPos findNearbyPearlTrapdoor(String string) {
-        BlockPos BlockPos2;
-        if (MessageInteract.mc.world != null && MessageInteract.mc.player != null) {
-            BlockPos2 = null;
-            double d = Double.MAX_VALUE;
-            for (Map.Entry<Integer, String> entry : MoreTags.pearlOwnerMap.entrySet()) {
-                Entity Entity2;
-                if (!entry.getValue().equalsIgnoreCase(string) || !((Entity2 = MessageInteract.mc.world.getEntityById(entry.getKey().intValue())) instanceof LivingEntity)) continue;
-                LivingEntity LivingEntity2 = (LivingEntity)Entity2;
-                for (BlockPos BlockPos3 : new BlockPos[]{LivingEntity2.getBlockPos(), LivingEntity2.getBlockPos().up()}) {
-                    double d2;
-                    if (!(MessageInteract.mc.world.getBlockState(BlockPos3).getBlock() instanceof EnderChestBlock) || !((d2 = VersionHelper.get().getPlayerPos().squaredDistanceTo(Vec3d.ofCenter(BlockPos3))) < d)) continue;
-                    d = d2;
-                    BlockPos2 = BlockPos3;
+    /** Finds the trapdoor position of {@code ownerName}'s nearest tracked pearl (live, else persisted), or null. */
+    private BlockPos findPearlTrapdoor(String ownerName) { // was: FvaNWO(String)
+        if (mc.world != null && mc.player != null) {
+            BlockPos closest = null;
+            double closestDist = Double.MAX_VALUE;
+            for (Map.Entry<Integer, String> entry : MoreTags.pearlOwners.entrySet()) {
+                if (entry.getValue().equalsIgnoreCase(ownerName) && mc.world.getEntityById(entry.getKey()) instanceof EnderPearlEntity pearl) {
+                    for (BlockPos candidate : new BlockPos[]{pearl.getBlockPos(), pearl.getBlockPos().down()}) {
+                        if (mc.world.getBlockState(candidate).getBlock() instanceof TrapdoorBlock) {
+                            double dist = VersionHelper.get().getPlayerPos().squaredDistanceTo(Vec3d.ofCenter(candidate));
+                            if (dist < closestDist) {
+                                closestDist = dist;
+                                closest = candidate;
+                            }
+                        }
+                    }
                 }
             }
-            if (BlockPos2 != null) {
-                return BlockPos2;
-            }
+            if (closest != null) return closest;
         }
-        if ((BlockPos2 = PearlStore.getByOwner(string)).isEmpty()) {
-            return null;
-        }
-        if (MessageInteract.mc.player == null || BlockPos2.size() == 1) {
-            return BlockPos2.getFirst().pos;
-        }
-        return BlockPos2.stream().min(Comparator.comparingDouble(pearlRecord -> VersionHelper.get().getPlayerPos().squaredDistanceTo(Vec3d.ofCenter(pearlRecord.pos)))).map(pearlRecord -> pearlRecord.pos).orElse(null);
+
+        List<PearlStore.PearlRecord> saved = PearlStore.getByOwner(ownerName);
+        if (saved.isEmpty()) return null;
+        return mc.player != null && saved.size() != 1
+            ? saved.stream().min(Comparator.comparingDouble(r -> VersionHelper.get().getPlayerPos().squaredDistanceTo(Vec3d.ofCenter(r.pos)))).map(r -> r.pos).orElse(null)
+            : saved.getFirst().pos;
     }
 
     @EventHandler
-    private void onReceiveMessage(ReceiveMessageEvent receiveMessageEvent) {
-        String string = receiveMessageEvent.getMessage().getString();
-        if (!string.contains("!tp")) {
-            return;
-        }
-        Matcher matcher = WHISPER_PATTERN.matcher(string);
-        if (!matcher.find()) {
-            return;
-        }
-        String string2 = matcher.group(1);
-        this.info("Received message from: " + string2, new Object[0]);
-        if (!((String)this.PlayerIGN.get()).isEmpty() && !string2.equalsIgnoreCase((String)this.PlayerIGN.get())) {
-            return;
-        }
-        if (this.action.get() == Action.PearlTeleport) {
-            this.pearlTrapdoorPos = this.findNearbyPearlTrapdoor(string2);
-            if (this.pearlTrapdoorPos == null) {
-                this.info("!tp from " + string2 + " but no tracked pearl with trapdoor found.", new Object[0]);
-                this.sendWhisper(string2, "Could not find a tracked pearl or trapdoor for you.", MessageInteract.generateRandomTag(8));
+    private void onReceiveMessage(ReceiveMessageEvent event) { // was: FvaNWO(ReceiveMessageEvent)
+        String msg = event.getMessage().getString();
+        if (!msg.contains("!tp")) return;
+        Matcher matcher = WHISPER_PATTERN.matcher(msg);
+        if (!matcher.find()) return;
+        String senderName = matcher.group(1);
+        this.info("Received message from: " + senderName);
+        if (!this.allowedPlayer.get().isEmpty() && !senderName.equalsIgnoreCase(this.allowedPlayer.get())) return;
+
+        if (this.action.get() == Action.LOAD_PEARL) {
+            this.pearlPos = this.findPearlTrapdoor(senderName);
+            if (this.pearlPos == null) {
+                this.info("!tp from " + senderName + " but no tracked pearl with trapdoor found.");
+                this.sendWhisper(senderName, "Could not find a tracked pearl or trapdoor for you.", randomToken(8));
                 return;
             }
-            if (MessageInteract.mc.player.squaredDistanceTo(Vec3d.ofCenter(this.pearlTrapdoorPos)) > 256.0) {
-                this.info("!tp from " + string2 + " but pearl is out of render distance.", new Object[0]);
-                this.sendWhisper(string2, "Pearl is out of render distance.", MessageInteract.generateRandomTag(8));
+            if (mc.player.squaredDistanceTo(Vec3d.ofCenter(this.pearlPos)) > 256.0) {
+                this.info("!tp from " + senderName + " but pearl is out of render distance.");
+                this.sendWhisper(senderName, "Pearl is out of render distance.", randomToken(8));
                 return;
             }
-            this.info("Pearl found at " + String.valueOf(this.pearlTrapdoorPos) + " \u2014 pathfinding to load for " + string2, new Object[0]);
-            this.sendWhisper(string2, "Pearl found, loading...", MessageInteract.generateRandomTag(8));
+            this.info("Pearl found at " + this.pearlPos + " — pathfinding to load for " + senderName);
+            this.sendWhisper(senderName, "Pearl found, loading...", randomToken(8));
             this.startPos = BlockPos.ofFloored(VersionHelper.get().getPlayerPos());
         }
-        this.isTeleporting = true;
+        this.rotationTicks = 0;
+        this.active = true;
     }
 
     @EventHandler
-    private void onTick(TickEvent.Pre pre) {
-        BlockPos BlockPos2;
-        if (MessageInteract.mc.player == null || MessageInteract.mc.world == null || !this.isTeleporting) {
-            return;
-        }
-        BlockPos BlockPos3 = BlockPos2 = this.action.get() == Action.PearlTeleport ? this.pearlTrapdoorPos : (BlockPos)this.position.get();
-        if (BlockPos2 == null) {
-            this.isTeleporting = false;
-            return;
-        }
-        if (this.interactDelayTicks > 0) {
-            --this.interactDelayTicks;
-            if (this.interactDelayTicks == 0) {
-                int n;
-                InventoryManager.sendUsePacket(new BlockHitResult(Vec3d.ofCenter(BlockPos2), Direction.UP, BlockPos2, false));
-                if (this.action.get() == Action.PearlTeleport && ((Boolean)this.dropPearl.get()).booleanValue() && (n = InventoryManager.findItemSlot(Items.ENDER_PEARL)) != -1) {
-                    InventoryManager.dropSlot(n, false);
+    private void onTick(TickEvent.Pre event) { // was: FvaNWO(Pre)
+        if (mc.player == null || mc.world == null || !this.active) return;
+        BlockPos resolvedPos = this.action.get() == Action.LOAD_PEARL ? this.pearlPos : this.position.get();
+        if (resolvedPos == null) {
+            this.active = false;
+        } else if (this.interactDelay > 0) {
+            this.interactDelay--;
+            if (this.interactDelay == 0) {
+                InventoryManager.interactWith(new BlockHitResult(Vec3d.ofCenter(resolvedPos), Direction.UP, resolvedPos, false));
+                if (this.action.get() == Action.LOAD_PEARL && this.dropPearl.get()) {
+                    int pearlSlot = InventoryManager.findItemSlotIndex(Items.ENDER_PEARL);
+                    if (pearlSlot != -1) InventoryManager.throwSlot(pearlSlot, false);
                 }
-                this.isTeleporting = false;
-                this.pearlTrapdoorPos = null;
-                if (((Boolean)this.returnToStartPos.get()).booleanValue() && this.startPos != null) {
-                    PathingHelper.setBaritoneGoal((Goal)new GoalBlock(this.startPos));
+                this.active = false;
+                this.pearlPos = null;
+                if (this.returnToStart.get() && this.startPos != null) PathingHelper.setGoal(new GoalBlock(this.startPos));
+            }
+        } else if (!WorldUtils.isWithinRange(resolvedPos, 4.0)) {
+            this.rotationTicks = 0;
+            PathingHelper.setGoal(new GoalNear(resolvedPos, 2));
+        } else {
+            PathingHelper.cancelEverything();
+            double yaw = Rotations.getYaw(resolvedPos);
+            double pitch = Rotations.getPitch(resolvedPos);
+            Rotations.rotate(yaw, pitch);
+            this.rotationTicks++;
+            if (this.rotationTicks >= 3) {
+                if (this.action.get() == Action.ATTACK) {
+                    mc.interactionManager.attackBlock(resolvedPos, Direction.UP);
+                    this.rotationTicks = 0;
+                    this.active = false;
+                } else if (this.action.get() == Action.INTERACT) {
+                    InventoryManager.interactWith(new BlockHitResult(Vec3d.ofCenter(resolvedPos), Direction.UP, resolvedPos, false));
+                    this.rotationTicks = 0;
+                    this.active = false;
+                } else if (mc.world.getBlockState(resolvedPos).getBlock() instanceof TrapdoorBlock) {
+                    InventoryManager.interactWith(new BlockHitResult(Vec3d.ofCenter(resolvedPos), Direction.UP, resolvedPos, false));
+                    this.rotationTicks = 0;
+                    this.interactDelay = 10;
+                } else {
+                    this.info("Trapdoor no longer present at " + resolvedPos + ", aborting.");
+                    this.rotationTicks = 0;
+                    this.active = false;
+                    this.pearlPos = null;
                 }
             }
-            return;
-        }
-        if (!WorldUtils.isWithinDistance(BlockPos2, 4.0)) {
-            PathingHelper.setGoalNear(new GoalNear(BlockPos2, 2));
-            return;
-        }
-        PathingHelper.stopPathing();
-        WorldUtils.lookAtBlock(BlockPos2);
-        if (this.action.get() == Action.LeftClick) {
-            Utils.leftClick();
-            this.isTeleporting = false;
-        } else if (this.action.get() == Action.RightClick) {
-            Utils.rightClick();
-            this.isTeleporting = false;
-        } else if (MessageInteract.mc.world.getBlockState(BlockPos2).getBlock() instanceof EnderChestBlock) {
-            InventoryManager.sendUsePacket(new BlockHitResult(Vec3d.ofCenter(BlockPos2), Direction.UP, BlockPos2, false));
-            this.interactDelayTicks = 10;
-        } else {
-            this.info("Trapdoor no longer present at " + String.valueOf(BlockPos2) + ", aborting.", new Object[0]);
-            this.isTeleporting = false;
-            this.pearlTrapdoorPos = null;
         }
     }
 
-    private void sendWhisper(String string, String string2, String string3) {
-        if (MessageInteract.mc.player == null) {
-            return;
-        }
-        MessageInteract.mc.player.networkHandler.sendChatCommand("msg " + string + " " + string2 + " " + string3);
-    }
-
-    public static String generateRandomTag(int n) {
-        StringBuilder stringBuilder = new StringBuilder(n);
-        for (int i = 0; i < n; ++i) {
-            stringBuilder.append("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".charAt(RANDOM.nextInt("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".length())));
-        }
-        return "[" + String.valueOf(stringBuilder) + "]";
-    }
-
-    public static final class Action
-    extends Enum<Action> {
-        public static final /* enum */ Action RightClick = new Action();
-        public static final /* enum */ Action LeftClick = new Action();
-        public static final /* enum */ Action PearlTeleport = new Action();
-        private static final /* synthetic */ Action[] $VALUES;
-
-        public static Action[] values() {
-            return (Action[])$VALUES.clone();
-        }
-
-        public static Action valueOf(String string) {
-            return Enum.valueOf(Action.class, string);
-        }
-
-        private static /* synthetic */ Action[] LR7hJDRhkI() {
-            return new Action[]{Mf6xpJ, zL8HcoH9O3, ARY91RcgOYBjLC};
-        }
-
-        static {
-            $VALUES = Action.LR7hJDRhkI();
+    /** Whispers {@code message} to {@code playerName} via /msg with an anti-spam suffix. */
+    private void sendWhisper(String playerName, String message, String antiSpam) { // was: FvaNWO(String,String,String)
+        if (mc.player != null) {
+            mc.player.networkHandler.sendChatCommand("msg " + playerName + " " + message + " " + antiSpam);
         }
     }
+
+    /** Generates a random alphanumeric anti-spam token like {@code [aZ9kQ...]}. */
+    public static String randomToken(int length) { // was: FvaNWO(int)
+        String alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        StringBuilder sb = new StringBuilder(length);
+        for (int i = 0; i < length; i++) {
+            sb.append(alphabet.charAt(RANDOM.nextInt(alphabet.length())));
+        }
+        return "[" + sb + "]";
+    }
+
+    /** What to do at the resolved position. */ // was: enum Action {FvaNWO, Q90GLXQ0Pef, psJq59YIbp3Z}
+    public enum Action { INTERACT, ATTACK, LOAD_PEARL }
 }
-

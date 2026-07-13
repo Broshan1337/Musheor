@@ -1,605 +1,449 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// Class name was already readable; internal members were obfuscated.
 package musheor.modules.automation;
 
 import java.io.OutputStream;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.UnknownServiceException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.LinkedBlockingQueue;
 import javax.net.ssl.HttpsURLConnection;
 import meteordevelopment.meteorclient.events.entity.EntityAddedEvent;
 import meteordevelopment.meteorclient.events.entity.EntityRemovedEvent;
 import meteordevelopment.meteorclient.events.world.ChunkDataEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
-import meteordevelopment.meteorclient.settings.*;
+import meteordevelopment.meteorclient.settings.EnumSetting;
+import meteordevelopment.meteorclient.settings.Setting;
+import meteordevelopment.meteorclient.settings.SettingGroup;
+import meteordevelopment.meteorclient.settings.StorageBlockListSetting;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import meteordevelopment.orbit.EventHandler;
+import musheor.musheor;
 import musheor.compat.VersionHelper;
 import musheor.compat.XearoHelper;
 import musheor.modules.features.CoordHider;
-import musheor.musheor;
 import musheor.utils.system.MusheorSystem;
-import net.minecraft.text.Formatting;
-import net.minecraft.entity.Entity;  
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.entity.LivingEntity;
-import net.minecraft.world.chunk.WorldChunk;
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.world.dimension.DimensionType;
-import net.minecraft.block.Blocks;               // Blocks
-import net.minecraft.util.math.BlockPos;         // BlockPos
+import net.minecraft.block.Blocks;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.entity.BlockEntityType;
-import net.minecraft.block.entity.CommandBlockBlockEntity;
-import net.minecraft.sound.SoundEvents;
+import net.minecraft.block.entity.EndGatewayBlockEntity;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.entity.projectile.thrown.EnderPearlEntity;
+import net.minecraft.registry.Registries;
 import net.minecraft.sound.SoundCategory;
-import net.minecraft.util.registry.Registry;
+import net.minecraft.sound.SoundEvents;
+import net.minecraft.util.Formatting;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.ChunkPos;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.Heightmap;
+import net.minecraft.world.World;
+import net.minecraft.world.chunk.WorldChunk;
 
 /**
- * Dispatcher: records events (player enter/leave visual range, stash detection,
- * ender pearl detection, illegal bedrock) and notifies via chat and/or a
- * user-configured Discord webhook.
- *
- * IMPORTANT: The webhook URL is entered by the user in settings. Dispatcher only
- * POSTs to the URL that the user provides — it does NOT send data to any
- * third-party server without the user's explicit configuration.
+ * "dispatcher" — passive base-finding / awareness scanner. Alerts (in chat, via the user's
+ * own Discord webhook, and/or as Xaero waypoints) on: players entering/leaving visual
+ * range, stashes (clusters of storage block entities), thrown ender pearls / stasis
+ * chambers, and illegally-placed bedrock. Webhook posts run on a background daemon thread
+ * with a configurable per-request delay. Only active beyond {@code minimum-distance} from
+ * spawn. (Security-relevant: the webhook is user-supplied; audited benign.)
  */
 public class Dispatcher extends Module {
-    private final SettingGroup sgGeneral;
-    private final SettingGroup sgVisualRange;
-    private final SettingGroup sgStashes;
-    private final SettingGroup sgPearls;
+    private final SettingGroup sgGeneral = this.settings.getDefaultGroup();            // was: SOYyh5IPg26f7F
+    private final SettingGroup sgVisualRange = this.settings.createGroup("Visual Range"); // was: rKbT3Ifwo
+    private final SettingGroup sgStashes = this.settings.createGroup("Stashes");       // was: r7hOYIKN2
+    private final SettingGroup sgPearls = this.settings.createGroup("Ender Pearls");   // was: oZHMlTL
 
-    private final Setting<NotificationType> type;
-    private final Setting<Integer> minimumDistance;
-    private final Setting<Boolean> allowWebhook;
-    public  final Setting<String>  webhookLink;
-    public  final Setting<Integer> webhookTimeoutMS;
-    private final Setting<Boolean> webhookCoords;
-    private final Setting<Boolean> allowPing;
-    public  final Setting<String>  roleID;
-    private final Setting<Boolean> allowCreateWaypoints;
-    private final Setting<Boolean> trackSigns;
-    private final Setting<Boolean> playSound;
+    private final Setting<NotificationType> notificationType = sgGeneral.add(new EnumSetting.Builder<NotificationType>() // was: xQr5FhbwpQPWgIQ
+        .name("notification-type").description("How notifications are being handled").defaultValue(NotificationType.BOTH).build());
+    private final Setting<Integer> minimumDistance = sgGeneral.add(new meteordevelopment.meteorclient.settings.IntSetting.Builder() // was: OMMZL1F3q
+        .name("minimum-distance").description("Minimum distance away from spawn before alerts are sent").defaultValue(1000).sliderRange(0, 10000).build());
+    private final Setting<Boolean> webhook = sgGeneral.add(new meteordevelopment.meteorclient.settings.BoolSetting.Builder() // was: zu3a44xDeMFMCRwm
+        .name("webhook").description("Sends notifications over a discord webhook").defaultValue(true)
+        .visible(() -> notificationType.get() == NotificationType.BOTH || notificationType.get() == NotificationType.WEBHOOK).build());
+    public final Setting<String> webhookLink = sgGeneral.add(new meteordevelopment.meteorclient.settings.StringSetting.Builder() // was: FvaNWO
+        .name("webhook-link").defaultValue("")
+        .visible(() -> (notificationType.get() == NotificationType.BOTH || notificationType.get() == NotificationType.WEBHOOK) && webhook.get()).build());
+    public final Setting<Integer> webhookTimeoutMs = sgGeneral.add(new meteordevelopment.meteorclient.settings.IntSetting.Builder() // was: Q90GLXQ0Pef
+        .name("webhook-timeout-MS").description("Timeout for webhook requests in ms, set to 0 to disable, increase when getting rate-limited").defaultValue(350).sliderRange(0, 5000)
+        .visible(() -> (notificationType.get() == NotificationType.BOTH || notificationType.get() == NotificationType.WEBHOOK) && webhook.get()).build());
+    private final Setting<Boolean> webhookCoords = sgGeneral.add(new meteordevelopment.meteorclient.settings.BoolSetting.Builder() // was: krxNb5lcQuWA
+        .name("webhook-coords").description("Includes coordinates in webhook message").defaultValue(true)
+        .visible(() -> (notificationType.get() == NotificationType.BOTH || notificationType.get() == NotificationType.WEBHOOK) && webhook.get()).build());
+    private final Setting<Boolean> allowPing = sgGeneral.add(new meteordevelopment.meteorclient.settings.BoolSetting.Builder() // was: nt0HZnvBBp
+        .name("allow-ping").description("Pings a role when a notification is sent").defaultValue(false)
+        .visible(() -> (notificationType.get() == NotificationType.BOTH || notificationType.get() == NotificationType.WEBHOOK) && webhook.get()).build());
+    public final Setting<String> roleId = sgGeneral.add(new meteordevelopment.meteorclient.settings.StringSetting.Builder() // was: psJq59YIbp3Z
+        .name("role-ID").defaultValue("")
+        .visible(() -> (notificationType.get() == NotificationType.BOTH || notificationType.get() == NotificationType.WEBHOOK) && webhook.get() && allowPing.get()).build());
+    private final Setting<Boolean> createWaypoints = sgGeneral.add(new meteordevelopment.meteorclient.settings.BoolSetting.Builder() // was: amz3UB1vE
+        .name("create-waypoints").description("Creates xaeros minimap waypoints").defaultValue(false)
+        .onChanged(value -> { if (XearoHelper.isLoaded()) XearoHelper.get().updateWaypointSettings(); }).visible(XearoHelper::isLoaded).build());
+    private final Setting<Boolean> recordSigns = sgGeneral.add(new meteordevelopment.meteorclient.settings.BoolSetting.Builder() // was: sBBIyQG5NWq0K
+        .name("record-signs").description("Alerts and records signs and their text").defaultValue(true).visible(() -> false).build());
+    private final Setting<Boolean> playSound = sgGeneral.add(new meteordevelopment.meteorclient.settings.BoolSetting.Builder() // was: sZkZ1izAy
+        .name("play-sound").description("Plays a sound when dispatch event is triggered").defaultValue(true)
+        .visible(() -> notificationType.get() == NotificationType.BOTH || notificationType.get() == NotificationType.CHAT).build());
 
-    private final Setting<Boolean> visualRangeAlerts;
-    private final Setting<VisualRangeType> visualRangeType;
-    private final Setting<Boolean> webhookVisualRange;
-    private final Setting<Boolean> waypointVisualRange;
-    private final Setting<Boolean> pingVisualRange;
+    private final Setting<Boolean> visualRangeAlerts = sgVisualRange.add(new meteordevelopment.meteorclient.settings.BoolSetting.Builder() // was: QYKUhjp
+        .name("visual-range-alerts").description("Sends an alert when a player enters or leaves visual range").defaultValue(true).build());
+    private final Setting<VisualRangeType> visualRangeType = sgVisualRange.add(new EnumSetting.Builder<VisualRangeType>() // was: NIz4xic3Js9
+        .name("visual-range-type").description("Choose what type of visual range alerts you want to receive").defaultValue(VisualRangeType.ENTER).visible(visualRangeAlerts::get).build());
+    private final Setting<Boolean> webhookVisualRange = sgVisualRange.add(new meteordevelopment.meteorclient.settings.BoolSetting.Builder() // was: u1WFwbQRSKa
+        .name("webhook-visual-range").description("Sends visual range alerts over discord webhook").defaultValue(true)
+        .visible(() -> (notificationType.get() == NotificationType.BOTH || notificationType.get() == NotificationType.WEBHOOK) && webhook.get() && visualRangeAlerts.get()).build());
+    private final Setting<Boolean> waypointVisualRange = sgVisualRange.add(new meteordevelopment.meteorclient.settings.BoolSetting.Builder() // was: LGDfbZq
+        .name("waypoint-visual-range").description("Creates a xaero waypoint when a player enters or leaves visual range").defaultValue(true)
+        .visible(() -> visualRangeAlerts.get() && createWaypoints.get()).build());
+    private final Setting<Boolean> pingVisualRange = sgVisualRange.add(new meteordevelopment.meteorclient.settings.BoolSetting.Builder() // was: to3T8DJCDVX8po
+        .name("ping-visual-range").description("Pings a discord role when a player enters or leaves visual range").defaultValue(false)
+        .visible(() -> (notificationType.get() == NotificationType.BOTH || notificationType.get() == NotificationType.WEBHOOK) && webhook.get() && visualRangeAlerts.get() && allowPing.get()).build());
 
-    private final Setting<Boolean> stashAlerts;
-    private final Setting<List<BlockEntityType<?>>> containerTypes;
-    private final Setting<Integer> containerThreshold;
-    private final Setting<List<BlockEntityType<?>>> singleContainerType;
-    private final Setting<Boolean> webhookStash;
-    private final Setting<Boolean> waypointStash;
-    private final Setting<Boolean> pingStash;
-    private final Setting<Boolean> illegalBedrockAlerts;
-    private final Setting<Boolean> waypointIllegalBedrock;
+    private final Setting<Boolean> stashAlerts = sgStashes.add(new meteordevelopment.meteorclient.settings.BoolSetting.Builder() // was: Sd3jEwKuGABy
+        .name("stash-alerts").description("Sends an alert when a stash or unnatural blocks are found").defaultValue(true).build());
+    private final Setting<List<BlockEntityType<?>>> containerList = sgStashes.add(new StorageBlockListSetting.Builder() // was: kJfFkD47Vh
+        .name("container-list").description("List of container blocks to track or search for").defaultValue(StorageBlockListSetting.STORAGE_BLOCKS).visible(stashAlerts::get).build());
+    private final Setting<Integer> containerThreshold = sgStashes.add(new meteordevelopment.meteorclient.settings.IntSetting.Builder() // was: ubHptFBRn5bO
+        .name("container-threshold").description("How many containers need to be in visual range before an alert is sent").defaultValue(8).sliderRange(1, 64).visible(stashAlerts::get).build());
+    private final Setting<List<BlockEntityType<?>>> instantHitList = sgStashes.add(new StorageBlockListSetting.Builder() // was: apOpfoOHr3fJVwT
+        .name("instant-hit-list").description("List of container blocks to track or search for, when a single one is found it will alert")
+        .defaultValue(BlockEntityType.SHULKER_BOX).visible(stashAlerts::get).build());
+    private final Setting<Boolean> webhookStashAlerts = sgStashes.add(new meteordevelopment.meteorclient.settings.BoolSetting.Builder() // was: hq1pN0qY
+        .name("webhook-stash-alerts").description("Sends visual range alerts over discord webhook").defaultValue(true)
+        .visible(() -> (notificationType.get() == NotificationType.BOTH || notificationType.get() == NotificationType.WEBHOOK) && webhook.get() && stashAlerts.get()).build());
+    private final Setting<Boolean> waypointStash = sgStashes.add(new meteordevelopment.meteorclient.settings.BoolSetting.Builder() // was: ptxWcpd1WV763T5
+        .name("waypoint-stash").description("Creates a xaero waypoint when a stash is found").defaultValue(true)
+        .visible(() -> stashAlerts.get() && createWaypoints.get()).build());
+    private final Setting<Boolean> pingStashAlerts = sgStashes.add(new meteordevelopment.meteorclient.settings.BoolSetting.Builder() // was: DnAk86nuI
+        .name("ping-stash-alerts").description("Pings a discord role when a player enters or leaves visual range").defaultValue(false)
+        .visible(() -> (notificationType.get() == NotificationType.BOTH || notificationType.get() == NotificationType.WEBHOOK) && webhook.get() && stashAlerts.get() && allowPing.get()).build());
+    private final Setting<Boolean> illegalBedrock = sgStashes.add(new meteordevelopment.meteorclient.settings.BoolSetting.Builder() // was: LlN8EpIZKbk
+        .name("illegal-bedrock").description("Sends an alert when illegal bedrock is found").defaultValue(false).build());
+    private final Setting<Boolean> waypointIllegalBedrock = sgStashes.add(new meteordevelopment.meteorclient.settings.BoolSetting.Builder() // was: pgjj9cLYUTE5g
+        .name("waypoint-illegal-bedrock").description("Creates a xaero waypoint when illegal bedrock is found").defaultValue(true)
+        .visible(() -> illegalBedrock.get() && createWaypoints.get()).build());
 
-    private final Setting<Boolean> pearlAlerts;
-    private final Setting<Boolean> webhookPearl;
-    private final Setting<Boolean> waypointPearl;
-    private final Setting<Boolean> pingPearl;
+    private final Setting<Boolean> pearlAlerts = sgPearls.add(new meteordevelopment.meteorclient.settings.BoolSetting.Builder() // was: IeStEJRJ9eb3l
+        .name("pearl-alerts").description("Sends an alert when an enderpearl or stasis-chamber is found").defaultValue(true).build());
+    private final Setting<Boolean> webhookPearlAlerts = sgPearls.add(new meteordevelopment.meteorclient.settings.BoolSetting.Builder() // was: sFazojak6ig8QgGq
+        .name("webhook-pearl-alerts").description("Sends a pearl alerts over discord webhook").defaultValue(true)
+        .visible(() -> (notificationType.get() == NotificationType.BOTH || notificationType.get() == NotificationType.WEBHOOK) && webhook.get() && pearlAlerts.get()).build());
+    private final Setting<Boolean> waypointPearl = sgPearls.add(new meteordevelopment.meteorclient.settings.BoolSetting.Builder() // was: ewq603nIlCd9Gbu
+        .name("waypoint-pearl").description("Creates a xaero waypoint when an enderpearl is found").defaultValue(true)
+        .visible(() -> pearlAlerts.get() && createWaypoints.get()).build());
+    private final Setting<Boolean> pingPearlAlerts = sgPearls.add(new meteordevelopment.meteorclient.settings.BoolSetting.Builder() // was: ExGM8SQ9Qni
+        .name("ping-pearl-alerts").description("Pings a discord role when a pearl or stasis chamber is found").defaultValue(false)
+        .visible(() -> (notificationType.get() == NotificationType.BOTH || notificationType.get() == NotificationType.WEBHOOK) && webhook.get() && pearlAlerts.get() && allowPing.get()).build());
 
-    /** Maps entity ID → last known position (for tracking thrown pearls). */
-    private final Map<Integer, Vec3d> trackedEntities = new HashMap<>();           // was: xG2PP8jo4RWLS
-    /** Maps chunk key → list of pearl positions in that chunk. */
-    private final Map<Long, List<Vec3d>> pearlsByChunk = new HashMap<>();          // was: LoFK6z05DRRnOV
-    /** Set of chunk keys already scanned for stashes. */
-    private final Set<Long> scannedChunks = new HashSet<>();                       // was: J2pm2c07elEb5G
-    /** Timestamp after which pearl alerts should be processed (2s debounce). */
-    private long pearlProcessTime = 0L;                                            // was: J9PiTNS
-    /** Saved Xaero waypoint set handle to restore on deactivate. */
-    private Object previousWaypointSet = null;                                     // was: CEOjBr5G5R
-    /** Queue of JSON payloads waiting to be POSTed to the webhook. */
-    private final LinkedBlockingQueue<String> webhookQueue = new LinkedBlockingQueue<>(); // was: MS1x7YGHjIg7eB
-    private Thread webhookThread;                                                   // was: KDNrzlU9qtrEv
+    private final Map<Integer, Vec3d> knownPearls = new HashMap<>();          // was: yS4isXf3gAzs (entityId -> pos)
+    private final Map<Long, List<Vec3d>> pearlsByChunk = new HashMap<>();     // was: eC9HV2bWGX (pending pearl alerts by chunk)
+    private final Set<Long> scannedChunks = new HashSet<>();                  // was: w9spWeVv3AvI
+    private long pearlAlertTime = 0L;                                         // was: HvulV2j9tKjohNgh (debounce time to flush pearl alerts)
+    private Object previousWaypointSet = null;                                // was: Qco5OF (Xaero handle)
+    private final LinkedBlockingQueue<String> webhookQueue = new LinkedBlockingQueue<>(); // was: cgqo7J5iR6
+    private Thread webhookThread;                                             // was: u2kcN4vsQhS46w5s
 
     public Dispatcher() {
-        super(musheor.AUTOMATION, "dispatcher",
-            "Records specific data and notifies the player in chat or through a discord webhook");
-
-        this.sgGeneral     = this.settings.getDefaultGroup();
-        this.sgVisualRange = this.settings.createGroup("Visual Range");
-        this.sgStashes     = this.settings.createGroup("Stashes");
-        this.sgPearls      = this.settings.createGroup("Ender Pearls");
-
-        this.type = sgGeneral.add(new EnumSetting.Builder<NotificationType>()
-            .name("notification-type")
-            .description("How notifications are being handled")
-            .defaultValue(NotificationType.Both)
-            .build());
-
-        this.minimumDistance = sgGeneral.add(new IntSetting.Builder()
-            .name("minimum-distance")
-            .description("Minimum distance away from spawn before alerts are sent")
-            .defaultValue(1000).sliderRange(0, 10000)
-            .build());
-
-        this.allowWebhook = sgGeneral.add(new BoolSetting.Builder()
-            .name("webhook")
-            .description("Sends notifications over a discord webhook")
-            .defaultValue(true)
-            .visible(() -> type.get() == NotificationType.Both || type.get() == NotificationType.WebhookOnly)
-            .build());
-
-        this.webhookLink = sgGeneral.add(new StringSetting.Builder()
-            .name("webhook-link")
-            .defaultValue("")
-            .visible(() -> (type.get() == NotificationType.Both || type.get() == NotificationType.WebhookOnly)
-                           && allowWebhook.get())
-            .build());
-
-        this.webhookTimeoutMS = sgGeneral.add(new IntSetting.Builder()
-            .name("webhook-timeout-MS")
-            .description("Timeout between webhook requests in ms, increase when rate-limited")
-            .defaultValue(350).sliderRange(0, 5000)
-            .visible(() -> (type.get() == NotificationType.Both || type.get() == NotificationType.WebhookOnly)
-                           && allowWebhook.get())
-            .build());
-
-        this.webhookCoords = sgGeneral.add(new BoolSetting.Builder()
-            .name("webhook-coords").description("Includes coordinates in webhook message")
-            .defaultValue(true)
-            .visible(() -> (type.get() == NotificationType.Both || type.get() == NotificationType.WebhookOnly)
-                           && allowWebhook.get())
-            .build());
-
-        this.allowPing = sgGeneral.add(new BoolSetting.Builder()
-            .name("allow-ping").description("Pings a role when a notification is sent")
-            .defaultValue(false)
-            .visible(() -> (type.get() == NotificationType.Both || type.get() == NotificationType.WebhookOnly)
-                           && allowWebhook.get())
-            .build());
-
-        this.roleID = sgGeneral.add(new StringSetting.Builder()
-            .name("role-ID").defaultValue("")
-            .visible(() -> (type.get() == NotificationType.Both || type.get() == NotificationType.WebhookOnly)
-                           && allowWebhook.get() && allowPing.get())
-            .build());
-
-        this.allowCreateWaypoints = sgGeneral.add(new BoolSetting.Builder()
-            .name("create-waypoints").description("Creates Xaero's Minimap waypoints")
-            .defaultValue(false)
-            .onChanged(v -> { if (XearoHelper.isLoaded()) XearoHelper.get().updateWaypointSettings(); })
-            .visible(XearoHelper::isLoaded)
-            .build());
-
-        this.trackSigns = sgGeneral.add(new BoolSetting.Builder()
-            .name("record-signs").description("Alerts and records signs and their text")
-            .defaultValue(true).visible(() -> false)
-            .build());
-
-        this.playSound = sgGeneral.add(new BoolSetting.Builder()
-            .name("play-sound").description("Plays a sound when dispatch event is triggered")
-            .defaultValue(true)
-            .visible(() -> type.get() == NotificationType.Both || type.get() == NotificationType.ChatOnly)
-            .build());
-
-        this.visualRangeAlerts = sgVisualRange.add(new BoolSetting.Builder()
-            .name("visual-range-alerts")
-            .description("Sends an alert when a player enters or leaves visual range")
-            .defaultValue(true).build());
-
-        this.visualRangeType = sgVisualRange.add(new EnumSetting.Builder<VisualRangeType>()
-            .name("visual-range-type")
-            .description("Choose what type of visual range alerts you want to receive")
-            .defaultValue(VisualRangeType.Enter)
-            .visible(() -> visualRangeAlerts.get()).build());
-
-        this.webhookVisualRange = sgVisualRange.add(new BoolSetting.Builder()
-            .name("webhook-visual-range").description("Sends visual range alerts over discord webhook")
-            .defaultValue(true)
-            .visible(() -> (type.get() == NotificationType.Both || type.get() == NotificationType.WebhookOnly)
-                           && allowWebhook.get() && visualRangeAlerts.get())
-            .build());
-
-        this.waypointVisualRange = sgVisualRange.add(new BoolSetting.Builder()
-            .name("waypoint-visual-range")
-            .description("Creates a waypoint when a player enters or leaves visual range")
-            .defaultValue(true)
-            .visible(() -> visualRangeAlerts.get() && allowCreateWaypoints.get())
-            .build());
-
-        this.pingVisualRange = sgVisualRange.add(new BoolSetting.Builder()
-            .name("ping-visual-range").description("Pings a discord role for visual range events")
-            .defaultValue(false)
-            .visible(() -> (type.get() == NotificationType.Both || type.get() == NotificationType.WebhookOnly)
-                           && allowWebhook.get() && visualRangeAlerts.get() && allowPing.get())
-            .build());
-
-        this.stashAlerts = sgStashes.add(new BoolSetting.Builder()
-            .name("stash-alerts")
-            .description("Sends an alert when a stash or unnatural blocks are found")
-            .defaultValue(true).build());
-
-        this.containerTypes = sgStashes.add(new StorageBlockListSetting.Builder()
-            .name("container-list")
-            .description("Container block types to track")
-            .defaultValue(StorageBlockListSetting.STORAGE_BLOCKS)
-            .visible(() -> stashAlerts.get()).build());
-
-        this.containerThreshold = sgStashes.add(new IntSetting.Builder()
-            .name("container-threshold")
-            .description("How many containers in range trigger a stash alert")
-            .defaultValue(8).sliderRange(1, 64)
-            .visible(() -> stashAlerts.get()).build());
-
-        this.singleContainerType = sgStashes.add(new StorageBlockListSetting.Builder()
-            .name("instant-hit-list")
-            .description("Container blocks that trigger an alert on first find")
-            .defaultValue(new BlockEntityType[]{ BlockEntityType.SHULKER_BOX })
-            .visible(() -> stashAlerts.get()).build());
-
-        this.webhookStash = sgStashes.add(new BoolSetting.Builder()
-            .name("webhook-stash-alerts").description("Sends stash alerts over discord webhook")
-            .defaultValue(true)
-            .visible(() -> (type.get() == NotificationType.Both || type.get() == NotificationType.WebhookOnly)
-                           && allowWebhook.get() && stashAlerts.get())
-            .build());
-
-        this.waypointStash = sgStashes.add(new BoolSetting.Builder()
-            .name("waypoint-stash").description("Creates a waypoint when a stash is found")
-            .defaultValue(true)
-            .visible(() -> stashAlerts.get() && allowCreateWaypoints.get())
-            .build());
-
-        this.pingStash = sgStashes.add(new BoolSetting.Builder()
-            .name("ping-stash-alerts").description("Pings a discord role when a stash is found")
-            .defaultValue(false)
-            .visible(() -> (type.get() == NotificationType.Both || type.get() == NotificationType.WebhookOnly)
-                           && allowWebhook.get() && stashAlerts.get() && allowPing.get())
-            .build());
-
-        this.illegalBedrockAlerts = sgStashes.add(new BoolSetting.Builder()
-            .name("illegal-bedrock").description("Sends an alert when illegal bedrock is found")
-            .defaultValue(false).build());
-
-        this.waypointIllegalBedrock = sgStashes.add(new BoolSetting.Builder()
-            .name("waypoint-illegal-bedrock")
-            .description("Creates a waypoint when illegal bedrock is found")
-            .defaultValue(true)
-            .visible(() -> illegalBedrockAlerts.get() && allowCreateWaypoints.get())
-            .build());
-
-        this.pearlAlerts = sgPearls.add(new BoolSetting.Builder()
-            .name("pearl-alerts").description("Sends an alert when an ender pearl or stasis chamber is found")
-            .defaultValue(true).build());
-
-        this.webhookPearl = sgPearls.add(new BoolSetting.Builder()
-            .name("webhook-pearl-alerts").description("Sends pearl alerts over discord webhook")
-            .defaultValue(true)
-            .visible(() -> (type.get() == NotificationType.Both || type.get() == NotificationType.WebhookOnly)
-                           && allowWebhook.get() && pearlAlerts.get())
-            .build());
-
-        this.waypointPearl = sgPearls.add(new BoolSetting.Builder()
-            .name("waypoint-pearl").description("Creates a waypoint when an ender pearl is found")
-            .defaultValue(true)
-            .visible(() -> pearlAlerts.get() && allowCreateWaypoints.get())
-            .build());
-
-        this.pingPearl = sgPearls.add(new BoolSetting.Builder()
-            .name("ping-pearl-alerts").description("Pings a discord role when a pearl/stasis is found")
-            .defaultValue(false)
-            .visible(() -> (type.get() == NotificationType.Both || type.get() == NotificationType.WebhookOnly)
-                           && allowWebhook.get() && pearlAlerts.get() && allowPing.get())
-            .build());
+        super(musheor.AUTOMATION, "dispatcher", "Records specific data and notifies the player in chat or through a discord webhook");
     }
 
     @Override
     public void onActivate() {
-        if (mc.player == null || mc.world == null) return;
+        if (this.mc.player == null || this.mc.world == null) return;
         if (XearoHelper.isLoaded()) {
-            previousWaypointSet = XearoHelper.get().getCurrentWaypointSetHandle();
-            if (previousWaypointSet != null) XearoHelper.get().setWaypointSet("Dispatcher");
+            this.previousWaypointSet = XearoHelper.get().getCurrentWaypointSetHandle();
+            if (this.previousWaypointSet != null) XearoHelper.get().setWaypointSet("Dispatcher");
         }
-        webhookThread = new Thread(() -> {
+
+        this.webhookThread = new Thread(() -> {
             while (!Thread.currentThread().isInterrupted()) {
                 try {
-                    String payload = webhookQueue.take();
-                    sendWebhookPost(webhookLink.get(), payload);
-                    int timeout = webhookTimeoutMS.get();
+                    String json = this.webhookQueue.take();
+                    sendWebhook(this.webhookLink.get(), json);
+                    int timeout = this.webhookTimeoutMs.get();
                     if (timeout > 0) Thread.sleep(timeout);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
             }
         });
-        webhookThread.setDaemon(true);
-        webhookThread.start();
+        this.webhookThread.setDaemon(true);
+        this.webhookThread.start();
     }
 
     @Override
     public void onDeactivate() {
-        scannedChunks.clear();
-        pearlsByChunk.clear();
-        trackedEntities.clear();
-        webhookQueue.clear();
-        if (webhookThread != null) {
-            webhookThread.interrupt();
-            webhookThread = null;
+        this.scannedChunks.clear();
+        this.pearlsByChunk.clear();
+        this.knownPearls.clear();
+        this.webhookQueue.clear();
+        if (this.webhookThread != null) {
+            this.webhookThread.interrupt();
+            this.webhookThread = null;
         }
-        if (XearoHelper.isLoaded()) {
-            XearoHelper.get().restoreWaypointSet(previousWaypointSet);
-        }
+        if (XearoHelper.isLoaded()) XearoHelper.get().restoreWaypointSet(this.previousWaypointSet);
     }
 
-    /** Scan a newly loaded chunk for stashes and illegal bedrock. */
-    @EventHandler
-    private void onChunkLoad(ChunkDataEvent event) {
-        if (mc.player == null || mc.world == null) return;
-        if (!stashAlerts.get()) return;
+    /** True if the player is within {@code minimum-distance} of spawn on either axis (alerts suppressed). */
+    private boolean nearSpawn() {
         Vec3d playerPos = VersionHelper.get().getPlayerPos();
-        if (Math.abs(playerPos.x) < minimumDistance.get() || Math.abs(playerPos.z) < minimumDistance.get()) return;
+        return Math.abs(playerPos.x) < this.minimumDistance.get() || Math.abs(playerPos.z) < this.minimumDistance.get();
+    }
 
+    @EventHandler
+    private void onChunkData(ChunkDataEvent event) { // was: FvaNWO(ChunkDataEvent)
+        if (this.mc.player == null || this.mc.world == null || !this.stashAlerts.get() || this.nearSpawn()) return;
         WorldChunk chunk = event.chunk();
         long chunkKey = ChunkPos.toLong(chunk.getPos().x, chunk.getPos().z);
-        if (!scannedChunks.add(chunkKey)) return; // already scanned
-        scanChunkForStashes(chunk.getPos());
+        if (this.scannedChunks.add(chunkKey)) {
+            this.scanChunk(chunk.getPos());
+        }
     }
 
-    /** Alert when a player or thrown pearl enters visual range. */
     @EventHandler
-    private void onEnterVisualRange(EntityAddedEvent event) {
-        if (mc.player == null || mc.world == null) return;
-        Vec3d playerPos = VersionHelper.get().getPlayerPos();
-        if (Math.abs(playerPos.x) < minimumDistance.get() || Math.abs(playerPos.z) < minimumDistance.get()) return;
+    private void onEntityAdded(EntityAddedEvent event) { // was: FvaNWO(EntityAddedEvent)
+        if (this.mc.player == null || this.mc.world == null || this.nearSpawn()) return;
 
-        // Player entered visual range
-        if (visualRangeAlerts.get()
-                && visualRangeType.get() != VisualRangeType.Leave
-                && event.entity.getUuid() != mc.player.getUuid()
-                && event.entity instanceof PlayerEntity player) {
-
-            if (type.get() == NotificationType.Both || type.get() == NotificationType.ChatOnly) {
+        if (this.visualRangeAlerts.get()
+            && this.visualRangeType.get() != VisualRangeType.LEAVE
+            && event.entity.getUuid() != this.mc.player.getUuid()
+            && event.entity instanceof PlayerEntity player) {
+            if (this.notificationType.get() == NotificationType.BOTH || this.notificationType.get() == NotificationType.CHAT) {
                 if (((CoordHider) Modules.get().get(CoordHider.class)).isActive()) {
-                    ChatUtils.sendMsg(player.getId() + 100, Formatting.RED,
-                        "(highlight)%s(default) has entered visual range!", player.getName().getString());
+                    ChatUtils.sendMsg(player.getId() + 100, Formatting.GRAY, "(highlight)%s(default) has entered visual range!", player.getName().getString());
                 } else {
-                    ChatUtils.sendMsg(player.getId() + 100, Formatting.RED,
-                        "(highlight)%s(default) has entered visual range at %d, %d, %d!",
-                        player.getName().getString(), player.getX(), player.getY(), player.getZ());
+                    ChatUtils.sendMsg(player.getId() + 100, Formatting.GRAY, "(highlight)%s(default) has entered visual range at %d, %d, %d!",
+                        player.getName().getString(), player.getBlockX(), player.getBlockY(), player.getBlockZ());
                 }
             }
-            if (allowWebhook.get() && webhookVisualRange.get() && !webhookLink.get().isEmpty()) {
-                String coords = webhookCoords.get()
-                    ? String.format("||%d, %d, %d||", (int)player.getX(), (int)player.getY(), (int)player.getZ()) : "";
-                queueWebhookEmbed("Visual Range",
-                    player.getName().getString() + " has entered visual range!\n" + coords,
-                    0xFF5555, pingVisualRange.get() && allowPing.get());
+            if (this.webhook.get() && this.webhookVisualRange.get() && !this.webhookLink.get().isEmpty()) {
+                String pos = this.webhookCoords.get() ? String.format("||%d, %d, %d||", player.getBlockX(), player.getBlockY(), player.getBlockZ()) : "";
+                this.queueWebhook("Visual Range", player.getName().getString() + " has entered visual range!\n" + pos, 16733525,
+                    this.pingVisualRange.get() && this.allowPing.get());
             }
-            if (allowCreateWaypoints.get() && waypointVisualRange.get() && XearoHelper.isLoaded()) {
-                XearoHelper.get().addWaypointToCurrent("VisualRange E: " + player.getName().getString(),
-                    "P", VersionHelper.get().getPlayerPos(), XearoHelper.WaypointColorHint.WHITE);
+            if (this.createWaypoints.get() && this.waypointVisualRange.get() && XearoHelper.isLoaded()) {
+                XearoHelper.get().addWaypointToCurrent("VisualRange E: " + player.getName().getString(), "P", VersionHelper.get().getPlayerPos(), XearoHelper.WaypointColorHint.WHITE);
             }
-            if (playSound.get()) {
-                mc.world.playSoundFromEntity(mc.player, mc.player,
-                    SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP, SoundCategory.PLAYERS, 3.0f, 1.0f);
+            if (this.playSound.get()) {
+                this.mc.world.playSound(this.mc.player, this.mc.player, SoundEvents.EXPERIENCE_ORB_PICKUP, SoundCategory.PLAYERS, 3.0F, 1.0F);
             }
         }
 
-        // Ender pearl entered visual range — track it for stasis detection
-        if (pearlAlerts.get() && event.entity instanceof LivingEntity living
-                && !trackedEntities.containsKey(living.getId())) {
-            Vec3d pearlPos = new Vec3d(living.getX(), living.getY(), living.getZ());
-            trackedEntities.put(living.getId(), pearlPos);
-            long chunkKey = (long)((int)living.getX() >> 4) * 1_000_000L + (long)((int)living.getZ() >> 4);
-            pearlsByChunk.computeIfAbsent(chunkKey, k -> new ArrayList<>()).add(pearlPos);
-            pearlProcessTime = System.currentTimeMillis() + 2000L; // 2 second debounce
+        if (this.pearlAlerts.get() && event.entity instanceof EnderPearlEntity pearlEntity && !this.knownPearls.containsKey(pearlEntity.getId())) {
+            Vec3d pos = new Vec3d(pearlEntity.getX(), pearlEntity.getY(), pearlEntity.getZ());
+            this.knownPearls.put(pearlEntity.getId(), pos);
+            long chunkKey = ((int) pearlEntity.getX() >> 4) * 1000000L + ((int) pearlEntity.getZ() >> 4);
+            this.pearlsByChunk.computeIfAbsent(chunkKey, k -> new ArrayList<>()).add(pos);
+            this.pearlAlertTime = System.currentTimeMillis() + 2000L;
         }
     }
 
-    /** Alert when a player leaves visual range. */
     @EventHandler
-    private void onLeaveVisualRange(EntityRemovedEvent event) {
-        if (mc.player == null || mc.world == null) return;
-        Vec3d playerPos = VersionHelper.get().getPlayerPos();
-        if (Math.abs(playerPos.x) < minimumDistance.get() || Math.abs(playerPos.z) < minimumDistance.get()) return;
-
-        if (visualRangeAlerts.get()
-                && visualRangeType.get() != VisualRangeType.Enter
-                && event.entity.getUuid() != mc.player.getUuid()
-                && event.entity instanceof PlayerEntity player) {
-
-            if (type.get() == NotificationType.Both || type.get() == NotificationType.ChatOnly) {
+    private void onEntityRemoved(EntityRemovedEvent event) { // was: FvaNWO(EntityRemovedEvent)
+        if (this.mc.player == null || this.mc.world == null || this.nearSpawn()) return;
+        if (this.visualRangeAlerts.get()
+            && this.visualRangeType.get() != VisualRangeType.ENTER
+            && event.entity.getUuid() != this.mc.player.getUuid()
+            && event.entity instanceof PlayerEntity player) {
+            if (this.notificationType.get() == NotificationType.BOTH || this.notificationType.get() == NotificationType.CHAT) {
                 if (((CoordHider) Modules.get().get(CoordHider.class)).isActive()) {
-                    ChatUtils.sendMsg(player.getId() + 100, Formatting.RED,
-                        "(highlight)%s(default) has left visual range!", player.getName().getString());
+                    ChatUtils.sendMsg(player.getId() + 100, Formatting.GRAY, "(highlight)%s(default) has left visual range!", player.getName().getString());
                 } else {
-                    ChatUtils.sendMsg(player.getId() + 100, Formatting.RED,
-                        "(highlight)%s(default) has left visual range at %d, %d, %d!",
-                        player.getName().getString(), (int)player.getX(), (int)player.getY(), (int)player.getZ());
+                    ChatUtils.sendMsg(player.getId() + 100, Formatting.GRAY, "(highlight)%s(default) has left visual range at %d, %d, %d!",
+                        player.getName().getString(), player.getBlockX(), player.getBlockY(), player.getBlockZ());
                 }
             }
-            if (allowWebhook.get() && webhookVisualRange.get() && !webhookLink.get().isEmpty()) {
-                String coords = webhookCoords.get()
-                    ? String.format("||%d, %d, %d||", (int)player.getX(), (int)player.getY(), (int)player.getZ()) : "";
-                queueWebhookEmbed("Visual Range",
-                    player.getName().getString() + " has left visual range!\n" + coords,
-                    0x822B2B, pingVisualRange.get() && allowPing.get());
+            if (this.webhook.get() && this.webhookVisualRange.get() && !this.webhookLink.get().isEmpty()) {
+                String pos = this.webhookCoords.get() ? String.format("||%d, %d, %d||", player.getBlockX(), player.getBlockY(), player.getBlockZ()) : "";
+                this.queueWebhook("Visual Range", player.getName().getString() + " has left visual range!\n" + pos, 8530731,
+                    this.pingVisualRange.get() && this.allowPing.get());
             }
-            if (allowCreateWaypoints.get() && waypointVisualRange.get() && XearoHelper.isLoaded()) {
-                XearoHelper.get().addWaypointToCurrent("VisualRange L: " + player.getName().getString(),
-                    "P", VersionHelper.get().getPlayerPos(), XearoHelper.WaypointColorHint.WHITE);
+            if (this.createWaypoints.get() && this.waypointVisualRange.get() && XearoHelper.isLoaded()) {
+                XearoHelper.get().addWaypointToCurrent("VisualRange L: " + player.getName().getString(), "P", VersionHelper.get().getPlayerPos(), XearoHelper.WaypointColorHint.WHITE);
             }
-            if (playSound.get()) {
-                mc.world.playSoundFromEntity(mc.player, mc.player,
-                    SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP, SoundCategory.PLAYERS, 3.0f, 1.0f);
+            if (this.playSound.get()) {
+                this.mc.world.playSound(this.mc.player, this.mc.player, SoundEvents.EXPERIENCE_ORB_PICKUP, SoundCategory.PLAYERS, 3.0F, 1.0F);
             }
         }
     }
 
-    /** Process pearl alerts after the 2-second debounce window. */
     @EventHandler
-    private void onTick(TickEvent.Pre event) {
-        if (pearlsByChunk.isEmpty() || System.currentTimeMillis() < pearlProcessTime) return;
-
-        for (Map.Entry<Long, List<Vec3d>> entry : pearlsByChunk.entrySet()) {
+    private void onTick(TickEvent.Pre event) { // was: FvaNWO(Pre)
+        if (this.pearlsByChunk.isEmpty() || System.currentTimeMillis() < this.pearlAlertTime) return;
+        for (Map.Entry<Long, List<Vec3d>> entry : this.pearlsByChunk.entrySet()) {
             List<Vec3d> pearls = entry.getValue();
             Vec3d first = pearls.getFirst();
             int count = pearls.size();
-
             if (count == 1) {
-                if (type.get() == NotificationType.Both || type.get() == NotificationType.ChatOnly) {
+                if (this.notificationType.get() == NotificationType.BOTH || this.notificationType.get() == NotificationType.CHAT) {
                     if (((CoordHider) Modules.get().get(CoordHider.class)).isActive()) {
-                        ChatUtils.sendMsg(0, Formatting.AQUA, "Found an Enderpearl!");
+                        ChatUtils.sendMsg(0, Formatting.BLUE, "Found an Enderpearl!");
                     } else {
-                        ChatUtils.sendMsg(0, Formatting.AQUA,
-                            "Enderpearl found at [%d, %d, %d]",
-                            (int)first.x, (int)first.y, (int)first.z);
+                        ChatUtils.sendMsg(0, Formatting.BLUE, "Enderpearl %sfound at [%s%d, %d, %d%s]",
+                            Formatting.WHITE, Formatting.GRAY, (int) first.x, (int) first.y, (int) first.z, Formatting.WHITE);
                     }
                 }
+            } else if (((CoordHider) Modules.get().get(CoordHider.class)).isActive()) {
+                ChatUtils.sendMsg(0, Formatting.BLUE, "Found %d Enderpearls!", count);
             } else {
-                if (((CoordHider) Modules.get().get(CoordHider.class)).isActive()) {
-                    ChatUtils.sendMsg(0, Formatting.AQUA, "Found %d Enderpearls!", count);
-                } else {
-                    ChatUtils.sendMsg(0, Formatting.AQUA,
-                        "%d Enderpearls found at [%d, %d, %d]",
-                        count, (int)first.x, (int)first.y, (int)first.z);
-                }
+                ChatUtils.sendMsg(0, Formatting.BLUE, "%d Enderpearls %sfound at [%s%d, %d, %d%s]",
+                    count, Formatting.WHITE, Formatting.GRAY, (int) first.x, (int) first.y, (int) first.z, Formatting.WHITE);
             }
 
-            if (allowWebhook.get() && webhookPearl.get() && !webhookLink.get().isEmpty()) {
-                String coords = webhookCoords.get()
-                    ? String.format("||%d, %d, %d||", (int)first.x, (int)first.y, (int)first.z) : "";
-                queueWebhookEmbed("Pearl Detected",
-                    "Found " + count + " enderpearls!\n" + coords,
-                    0x5555FF, pingPearl.get() && allowPing.get());
+            if (this.webhook.get() && this.webhookPearlAlerts.get() && !this.webhookLink.get().isEmpty()) {
+                String pos = this.webhookCoords.get() ? String.format("||%d, %d, %d||", (int) first.x, (int) first.y, (int) first.z) : "";
+                this.queueWebhook("Pearl Detected", "Found " + count + " enderpearls!\n" + pos, 5592575, this.pingPearlAlerts.get() && this.allowPing.get());
             }
-            if (allowCreateWaypoints.get() && waypointPearl.get() && XearoHelper.isLoaded()) {
-                XearoHelper.get().addWaypointToCurrent("Pearls: " + count, "P", first,
-                    XearoHelper.WaypointColorHint.BLUE);
+            if (this.createWaypoints.get() && this.waypointPearl.get() && XearoHelper.isLoaded()) {
+                XearoHelper.get().addWaypointToCurrent("Pearls: " + count, "P", first, XearoHelper.WaypointColorHint.BLUE);
             }
         }
-        pearlsByChunk.clear();
+        this.pearlsByChunk.clear();
     }
 
-    /** Scan a chunk for containers (stashes) and illegal bedrock. */
-    private void scanChunkForStashes(ChunkPos chunkPos) {
-        if (mc.world == null || mc.player == null) return;
-        Vec3d playerPos = VersionHelper.get().getPlayerPos();
-        if (Math.abs(playerPos.x) < minimumDistance.get() || Math.abs(playerPos.z) < minimumDistance.get()) return;
+    /** Scans a chunk for stashes (container clusters), instant-hit containers, and illegal bedrock. */
+    private void scanChunk(ChunkPos chunkPos) { // was: FvaNWO(ChunkPos)
+        if (this.mc.world == null || this.mc.player == null || this.nearSpawn()) return;
+        WorldChunk chunk = this.mc.world.getChunk(chunkPos.x, chunkPos.z);
+        MusheorSystem.debug("[DEBUG] Scanning chunk " + chunkPos.x + ", " + chunkPos.z + " - block entities: " + chunk.getBlockEntities().size());
 
-        WorldChunk chunk = mc.world.getChunk(chunkPos.x, chunkPos.z);
-        MusheorSystem.debug("[DEBUG] Scanning chunk %d, %d - block entities: %d",
-            chunkPos.x, chunkPos.z, chunk.getBlockEntities().size());
-
-        // --- Stash detection ---
-        Map<BlockEntityType<?>, Integer> containerCounts = new HashMap<>();
-        boolean hasInstantHit = false;
+        Map<BlockEntityType<?>, Integer> foundContainers = new HashMap<>();
+        boolean foundSingleAlert = false;
         BlockPos firstContainerPos = null;
 
         for (Map.Entry<BlockPos, BlockEntity> entry : chunk.getBlockEntities().entrySet()) {
             BlockEntity be = entry.getValue();
             BlockPos pos = entry.getKey();
-            boolean isContainerType = containerTypes.get().contains(be.getType());
-            boolean isInstantHit    = singleContainerType.get().contains(be.getType());
-            if (isContainerType || isInstantHit) {
-                containerCounts.merge(be.getType(), 1, Integer::sum);
+            boolean isThresholdContainer = this.containerList.get().contains(be.getType());
+            boolean isSingleContainer = this.instantHitList.get().contains(be.getType());
+            if (isThresholdContainer || isSingleContainer) {
+                foundContainers.merge(be.getType(), 1, Integer::sum);
                 if (firstContainerPos == null) firstContainerPos = pos;
             }
-            if (isInstantHit) hasInstantHit = true;
+            if (isSingleContainer) foundSingleAlert = true;
         }
 
-        int totalContainers = containerTypes.get().isEmpty() ? 0
-            : containerCounts.entrySet().stream()
-                .filter(e -> containerTypes.get().contains(e.getKey()))
-                .mapToInt(Map.Entry::getValue).sum();
-
-        boolean isStash = !containerTypes.get().isEmpty() && totalContainers >= containerThreshold.get();
-
-        if ((isStash || hasInstantHit) && firstContainerPos != null) {
-            StringBuilder detail = new StringBuilder();
-            for (Map.Entry<BlockEntityType<?>, Integer> e : containerCounts.entrySet()) {
-                String name = Registry.BLOCK_ENTITY_TYPE.getId(e.getKey()).toString().replace("minecraft:", "");
-                detail.append("**[").append(e.getValue()).append("x]** ").append(name).append("\n");
+        int totalThresholdContainers = this.containerList.get().isEmpty() ? 0
+            : foundContainers.entrySet().stream().filter(e -> this.containerList.get().contains(e.getKey())).mapToInt(Map.Entry::getValue).sum();
+        boolean thresholdMet = !this.containerList.get().isEmpty() && totalThresholdContainers >= this.containerThreshold.get();
+        if ((thresholdMet || foundSingleAlert) && firstContainerPos != null) {
+            StringBuilder summary = new StringBuilder();
+            for (Map.Entry<BlockEntityType<?>, Integer> entry : foundContainers.entrySet()) {
+                String name = Registries.BLOCK_ENTITY_TYPE.getId(entry.getKey()).toString().replace("minecraft:", "");
+                summary.append("**[").append(entry.getValue()).append("x]** ").append(name).append("\n");
             }
-            int total = containerCounts.values().stream().mapToInt(Integer::intValue).sum();
-            String posStr = String.format("|%d, %d, %d|",
-                firstContainerPos.getX(), firstContainerPos.getY(), firstContainerPos.getZ());
-            String description = detail.toString().trim() + "\n||" + posStr + "||";
-
-            if (type.get() == NotificationType.Both || type.get() == NotificationType.ChatOnly) {
+            int totalContainers = foundContainers.values().stream().mapToInt(Integer::intValue).sum();
+            String blockCoords = String.format("|%d, %d, %d|", firstContainerPos.getX(), firstContainerPos.getY(), firstContainerPos.getZ());
+            String description = summary.toString().trim() + "\n||" + blockCoords + "||";
+            if (this.notificationType.get() == NotificationType.BOTH || this.notificationType.get() == NotificationType.CHAT) {
                 if (((CoordHider) Modules.get().get(CoordHider.class)).isActive()) {
-                    ChatUtils.sendMsg(0, Formatting.GOLD,
-                        "Stash found! - %d containers", total);
+                    ChatUtils.sendMsg(0, Formatting.WHITE, "Stash found! %s- %s%d containers", Formatting.WHITE, Formatting.AQUA, totalContainers);
                 } else {
-                    ChatUtils.sendMsg(0, Formatting.GOLD,
-                        "Stash found at %d, %d, %d - %d containers",
-                        firstContainerPos.getX(), firstContainerPos.getY(), firstContainerPos.getZ(), total);
+                    ChatUtils.sendMsg(0, Formatting.WHITE, "Stash found at %s%d, %d, %d %s- %s%d containers",
+                        Formatting.GRAY, firstContainerPos.getX(), firstContainerPos.getY(), firstContainerPos.getZ(), Formatting.WHITE, Formatting.AQUA, totalContainers);
                 }
             }
-            if (allowWebhook.get() && webhookStash.get() && !webhookLink.get().isEmpty()) {
-                queueWebhookEmbed("GOLD GOLD GOLD", description, 0xFFBB33, pingStash.get() && allowPing.get());
+            if (this.webhook.get() && this.webhookStashAlerts.get() && !this.webhookLink.get().isEmpty()) {
+                this.queueWebhook("GOLD GOLD GOLD", description, 16759603, this.pingStashAlerts.get() && this.allowPing.get());
             }
-            if (allowCreateWaypoints.get() && waypointStash.get() && XearoHelper.isLoaded()) {
-                XearoHelper.get().addWaypointToCurrent("Stash: " + total, "S",
-                    Vec3d.ofCenter(firstContainerPos), XearoHelper.WaypointColorHint.GOLD);
+            if (this.createWaypoints.get() && this.waypointStash.get() && XearoHelper.isLoaded()) {
+                XearoHelper.get().addWaypointToCurrent("Stash: " + totalContainers, "S", Vec3d.ofCenter(firstContainerPos), XearoHelper.WaypointColorHint.GOLD);
             }
         }
 
-        // --- Illegal bedrock detection ---
-        if (!illegalBedrockAlerts.get()) return;
-        // ... (bedrock scanning logic follows — uses dimension type checks and Y-range validation)
+        if (this.illegalBedrock.get()) {
+            boolean isOverworld = this.mc.world.getRegistryKey() == World.OVERWORLD;
+            boolean isNether = this.mc.world.getRegistryKey() == World.NETHER;
+            boolean isEnd = this.mc.world.getRegistryKey() == World.END;
+            if (isEnd) {
+                for (BlockEntity be : chunk.getBlockEntities().values()) {
+                    if (be instanceof EndGatewayBlockEntity) return; // natural end-gateway bedrock, skip
+                }
+            }
+
+            BlockPos illegalPos = null;
+            outer:
+            for (int x = chunkPos.getStartX(); x <= chunkPos.getEndX(); x++) {
+                for (int z = chunkPos.getStartZ(); z <= chunkPos.getEndZ(); z++) {
+                    int minY = this.mc.world.getBottomY();
+                    int maxY = this.mc.world.getTopY(Heightmap.Type.MOTION_BLOCKING, x, z);
+                    for (int y = minY; y < maxY; y++) {
+                        BlockPos pos = new BlockPos(x, y, z);
+                        if (this.mc.world.getBlockState(pos).getBlock() == Blocks.BEDROCK) {
+                            boolean illegal = isOverworld && y > 5 || isNether && y > 5 && y < 122 || isEnd;
+                            if (illegal) {
+                                illegalPos = pos;
+                                break outer;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (illegalPos != null) {
+                String pos = this.webhookCoords.get() ? String.format("|%d, %d, %d|", illegalPos.getX(), illegalPos.getY(), illegalPos.getZ()) : "";
+                if (this.notificationType.get() == NotificationType.BOTH || this.notificationType.get() == NotificationType.CHAT) {
+                    if (((CoordHider) Modules.get().get(CoordHider.class)).isActive()) {
+                        ChatUtils.sendMsg(0, Formatting.RED, "Illegal bedrock found!");
+                    } else {
+                        ChatUtils.sendMsg(0, Formatting.RED, "Illegal bedrock found at %s%d, %d, %d",
+                            Formatting.GRAY, illegalPos.getX(), illegalPos.getY(), illegalPos.getZ());
+                    }
+                }
+                if (this.webhook.get() && this.webhookStashAlerts.get() && !this.webhookLink.get().isEmpty()) {
+                    this.queueWebhook("Illegal Bedrock", "**Found illegal bedrock**!!\n" + pos, 16711935, this.pingStashAlerts.get() && this.allowPing.get());
+                }
+                if (this.createWaypoints.get() && this.waypointIllegalBedrock.get() && XearoHelper.isLoaded()) {
+                    XearoHelper.get().addWaypointToCurrent("Illegal Bedrock", "B", Vec3d.ofCenter(illegalPos), XearoHelper.WaypointColorHint.RED);
+                }
+            }
+        }
     }
 
-    /**
-     * Build and enqueue a Discord embed JSON payload.
-     * Only sends to the webhook URL the USER has configured.
-     */
-    private void queueWebhookEmbed(String title, String description, int color, boolean ping) {
-        String pingStr = ping && allowPing.get() && !roleID.get().isEmpty()
-            ? "\"content\": \"<@&" + roleID.get() + "\">\"," : "";
-        String json = "{" + pingStr + "\"embeds\": [{\"title\": \""
-            + title.replace("\"", "\\\"") + "\",\"description\": \""
-            + description.replace("\"", "\\\"").replace("\n", "\\n")
+    /** Builds the Discord embed JSON and enqueues it for the background sender thread. */
+    private void queueWebhook(String title, String description, int color, boolean pingRole) { // was: FvaNWO(String,String,int,boolean)
+        String content = pingRole && this.allowPing.get() && !this.roleId.get().isEmpty()
+            ? "\"content\": \"<@&" + this.roleId.get() + ">\","
+            : "";
+        String json = "{" + content
+            + "\"embeds\": [{\"title\": \"" + title.replace("\"", "\\\"")
+            + "\",\"description\": \"" + description.replace("\"", "\\\"").replace("\n", "\\n")
             + "\",\"color\": " + color + "}]}";
-        webhookQueue.offer(json);
+        this.webhookQueue.offer(json);
     }
 
-    /** POST a JSON string to the given Discord webhook URL. */
-    private static void sendWebhookPost(String webhookUrl, String json) {  // was: TAdu5cndwWu3A1
+    /** POSTs the embed JSON to the configured Discord webhook URL. */
+    private static void sendWebhook(String webhookURL, String json) { // was: FvaNWO(String,String)
         try {
-            URL url = new URL(webhookUrl);
-            HttpsURLConnection conn = (HttpsURLConnection) url.openConnection();
-            conn.addRequestProperty("Content-Type", "application/json");
-            conn.addRequestProperty("User-Agent", "Mozilla");
-            conn.setDoOutput(true);
-            conn.setRequestMethod("POST");
-            OutputStream out = conn.getOutputStream();
-            out.write(json.getBytes());
-            out.flush();
-            out.close();
-            conn.getInputStream().close();
-            conn.disconnect();
+            URL url = new URL(webhookURL);
+            HttpsURLConnection connection = (HttpsURLConnection) url.openConnection();
+            connection.addRequestProperty("Content-Type", "application/json");
+            connection.addRequestProperty("User-Agent", "Mozilla");
+            connection.setDoOutput(true);
+            connection.setRequestMethod("POST");
+            OutputStream stream = connection.getOutputStream();
+            stream.write(json.getBytes());
+            stream.flush();
+            stream.close();
+            connection.getInputStream().close();
+            connection.disconnect();
         } catch (MalformedURLException | UnknownServiceException ignored) {
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Enums
-    // -------------------------------------------------------------------------
+    /** Which channels notifications are sent through. */ // was: enum NotificationType {FvaNWO, Q90GLXQ0Pef, psJq59YIbp3Z}
+    private enum NotificationType { CHAT, WEBHOOK, BOTH }
 
-    /** How the user wants to receive notifications. */
-    enum NotificationType {
-        ChatOnly,       // was: WOqvNwnejoKApoa
-        WebhookOnly,    // was: Tne1O2a8S2sVbX
-        Both            // was: bGqPXJzBtf (default)
-    }
-
-    /** Which visual range events trigger alerts. */
-    enum VisualRangeType {
-        Enter,          // was: gsYdyKVgv (default) — alert on enter only
-        Leave,          // was: V2mbWoNZftH0t — alert on leave only
-        Both            // was: l92qSNnpKrYO — alert on both
-    }
+    /** Which visual-range transitions trigger alerts. */ // was: enum VisualRangeType {FvaNWO, Q90GLXQ0Pef, psJq59YIbp3Z}
+    private enum VisualRangeType { ENTER, LEAVE, BOTH }
 }

@@ -1,13 +1,11 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// (source class was obfuscated as obf.CUfICea7s)
 package musheor.utils;
 
 import baritone.api.BaritoneAPI;
 import baritone.api.pathing.goals.Goal;
 import baritone.api.pathing.goals.GoalBlock;
 import baritone.api.pathing.goals.GoalXZ;
-import baritone.api.process.IBuilderProcess;
-import java.lang.runtime.SwitchBootstraps;
-import java.util.UUID;
 import meteordevelopment.meteorclient.settings.BlockSetting;
 import meteordevelopment.meteorclient.settings.BoolSetting;
 import meteordevelopment.meteorclient.settings.DoubleSetting;
@@ -25,271 +23,226 @@ import meteordevelopment.meteorclient.utils.player.ChatUtils;
 import musheor.compat.VersionHelper;
 import musheor.modules.automation.GatherItem;
 import musheor.modules.automation.HighwayBuilder;
-import musheor.utils.WorldUtils;
+import musheor.modules.tech.MessageInteract;
 import musheor.utils.internal.HighwayState;
 import musheor.utils.internal.PathingHelper;
 import musheor.utils.system.MusheorSystem;
-import net.minecraft.item.Item;
 import net.minecraft.block.Block;
-import net.minecraft.text.Text;
-import net.minecraft.text.MutableText;
-import net.minecraft.network.packet.Packet;
-import net.minecraft.network.packet.s2c.common.DisconnectS2CPacket;
-import net.minecraft.network.packet.c2s.play.CommandExecutionC2SPacket;
-import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.option.KeyBinding;
+import net.minecraft.item.Item;
+import net.minecraft.network.packet.c2s.play.ChatMessageC2SPacket;
+import net.minecraft.network.packet.c2s.play.CommandExecutionC2SPacket;
+import net.minecraft.text.MutableText;
+import net.minecraft.text.Text;
+import net.minecraft.util.math.BlockPos;
 
+/**
+ * Broad player/movement helper for the highway system: reach checks, camera and
+ * strafe control, module-setting mutation, direction facing, and the ".tp"
+ * teleport-request message. (Distinct from Meteor's own {@code PlayerUtils}, which
+ * is fully-qualified where used below.)
+ */
 public class PlayerUtils {
-    private static final MinecraftClient mc = MinecraftClient.getInstance(); // was: XrtBzLhuwKI
-    private static final IBuilderProcess baritoneBuilder =                   // was: ZqICw8j
-        BaritoneAPI.getProvider().getPrimaryBaritone().getBuilderProcess();
+    private static final MinecraftClient mc = MinecraftClient.getInstance(); // was: Q90GLXQ0Pef (field)
 
-    /** Resumes Baritone's builder process if it is currently paused. */
-    public static void resumeBaritone() { // was: ZjVmRLiAeys38
-        if (baritoneBuilder.isPaused()) {
-            baritoneBuilder.resume();
+    /** True if (x,y,z) is within the player's block-interaction range. */
+    public static boolean isWithinReach(double x, double y, double z) { // was: FvaNWO(double,double,double)
+        double reach = mc.player.getBlockInteractionRange();
+        return meteordevelopment.meteorclient.utils.player.PlayerUtils.squaredDistance(
+            mc.player.getX(), mc.player.getEyeY(), mc.player.getZ(), x, y, z) <= reach * reach;
+    }
+
+    public static boolean isWithinReach(BlockPos blockPos) { // was: FvaNWO(BlockPos)
+        return isWithinReach(blockPos.toCenterPos().getX(), blockPos.toCenterPos().getY(), blockPos.toCenterPos().getZ());
+    }
+
+    public static void cancelPathing() { // was: FvaNWO() (void)
+        PathingHelper.cancelEverything();
+    }
+
+    /** Sends "[Musheor]: <reason>" to the server as a chat message. */
+    public static void sendChatMessage(String reason) { // was: FvaNWO(String)
+        assert mc.player != null;
+        MutableText text = Text.literal("[Musheor]: " + reason);
+        // Original: player.networkHandler.method_52781(new class_2661(text)) — outgoing chat.
+        mc.player.networkHandler.sendChatMessage(text.getString());
+    }
+
+    /** Toggles Meteor's AutoWalk to match {@code active}, only in AUTOWALK highway mode. */
+    public static void setAutoWalk(boolean active) { // was: FvaNWO(boolean)
+        if (HighwayBuilder.getMode() == HighwayBuilder.Mode.AUTO) {
+            Module autoWalk = Modules.get().get(AutoWalk.class);
+            if (active && !autoWalk.isActive()) autoWalk.toggle();
+            if (!active && autoWalk.isActive()) autoWalk.toggle();
         }
     }
 
-    /** Stops all Baritone pathing. */
-    public static void stopBaritone() { // was: JaevRTUQKWIx5LQ
-        PathingHelper.stopPathing();
+    public static void setSneak(boolean flag) { // was: Q90GLXQ0Pef(boolean)
+        mc.options.sneakKey.setPressed(flag);
     }
 
-    /**
-     * Shows a disconnect screen with "[Musheor]: " + message as the reason.
-     * This is implemented by calling networkHandler.onDisconnect(), which triggers
-     * the client-side disconnect UI without actually sending anything to the server.
-     */
-    public static void sendChatMessage(String message) { // was: J2pm2c07elEb5G(String)
-        assert (PlayerUtils.mc.player != null);
-        MutableText text = Text.literal("[Musheor]: " + message);
-        PlayerUtils.mc.player.networkHandler.onDisconnect(new DisconnectS2CPacket((Text) text));
-    }
-
-    /** Activates or deactivates Meteor's FreeLook module to match the requested state. */
-    public static void setFreeLookActive(boolean active) { // was: UgB10d(boolean)
-        Module module = Modules.get().get(FreeLook.class);
-        if (active != module.isActive()) {
-            module.toggle();
-        }
-    }
-
-    /**
-     * Activates or deactivates Meteor's AutoWalk module (only when highway mode is
-     * set to AutoWalk movement mode).
-     */
-    public static void setAutoWalkActive(boolean active) { // was: KP44bk(boolean)
-        if (HighwayBuilder.getMovementMode() == HighwayBuilder.Mode.AUTOWALK) {
-            Module module = Modules.get().get(AutoWalk.class);
-            if (active  && !module.isActive()) module.toggle();
-            if (!active &&  module.isActive()) module.toggle();
-        }
-    }
-
-    /** Enables or disables the sneak key state. */
-    public static void setSneaking(boolean sneaking) { // was: jWrhVf2psx(boolean)
-        PlayerUtils.mc.options.sneakKey.setPressed(sneaking);
-    }
-
-    /** Disables the HighwayBuilder module entirely. */
-    public static void disableHighwayBuilder() { // was: xynAsOKhN7t
-        HighwayBuilder.cleanup();
+    /** Disables helper modules then toggles the HighwayBuilder module off. */
+    public static void toggleHighwayBuilder() { // was: Q90GLXQ0Pef() (void)
+        HighwayBuilder.disableHelperModules();
         Modules.get().get(HighwayBuilder.class).toggle();
     }
 
-    /** Configures FreeLook to Camera mode with pitch 15° for an overhead view, then enables it. */
-    public static void enableFreeLookMode() { // was: Gd2ks78ySQq40
-        if (PlayerUtils.mc.player != null && PlayerUtils.mc.world != null) {
-            PlayerUtils.setModuleSetting(FreeLook.class, "mode", FreeLook.Mode.Camera);
-            PlayerUtils.setModuleSetting(FreeLook.class, "camera-sensitivity", 8.0);
-            PlayerUtils.setModuleSetting(FreeLook.class, "arrows-control-opposite", false);
-            PlayerUtils.mc.player.setPitch(15.0f);
-            PlayerUtils.setFreeLookActive(true);
+    /** Enables Meteor FreeLook in camera mode looking slightly down (for overview). */
+    public static void enableFreeLookCamera() { // was: psJq59YIbp3Z()
+        if (mc.player != null && mc.world != null) {
+            setModuleSetting(FreeLook.class, "mode", FreeLook.Mode.Camera);
+            setModuleSetting(FreeLook.class, "camera-sensitivity", 8.0);
+            setModuleSetting(FreeLook.class, "arrows-control-opposite", false);
+            mc.player.setPitch(15.0F);
+            ((FreeLook) Modules.get().get(FreeLook.class)).toggle();
         }
     }
 
-    /**
-     * Generic helper to set any Meteor Module setting by name. Handles all
-     * common setting types: Integer, Double, String, Boolean, Item, Block, Enum.
-     */
-    public static <M extends Module, T> void setModuleSetting( // was: jOdDDFXSeWl4(Class,String,T)
-            Class<M> moduleClass, String settingName, T value) {
-        if (Modules.get().get(moduleClass) != null) {
-            Setting<?> setting = Modules.get().get(moduleClass).settings.get(settingName);
-            if (setting != null) {
-                try {
-                    int typeCase = 0;
-                    switch (SwitchBootstraps.typeSwitch("typeSwitch",
-                            new Object[]{Integer.class, Double.class, String.class, Boolean.class,
-                                         Item.class, Block.class, Enum.class},
-                            value, typeCase)) {
-                        case 0: ((IntSetting) setting).set((Object)(Integer) value);    break;
-                        case 1: ((DoubleSetting) setting).set((Object)(Double) value);  break;
-                        case 2: ((StringSetting) setting).set((Object)(String) value);  break;
-                        case 3: ((BoolSetting) setting).set((Object)(Boolean) value);   break;
-                        case 4: ((ItemSetting) setting).set((Object)(Item) value);      break;
-                        case 5: ((BlockSetting) setting).set((Object)(Block) value);    break;
-                        case 6: ((EnumSetting) setting).set((Object)(Enum<?>) value);   break;
-                    }
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-            } else {
-                ChatUtils.warning("Setting %d not found", new Object[]{settingName});
+    /** Generic setter for a module setting of any supported type. */
+    public static <M extends Module, T> void setModuleSetting(Class<M> module, String setting, T value) { // was: FvaNWO(Class,String,T)
+        if (Modules.get().get(module) == null) {
+            ChatUtils.warning("Module %d not found", new Object[]{module});
+            return;
+        }
+        Setting<?> s = Modules.get().get(module).settings.get(setting);
+        if (s == null) {
+            ChatUtils.warning("Setting %d not found", new Object[]{setting});
+            return;
+        }
+        try {
+            switch (value) {
+                case Integer integer -> ((IntSetting) s).set(integer);
+                case Double d       -> ((DoubleSetting) s).set(d);
+                case String string  -> ((StringSetting) s).set(string);
+                case Boolean bool   -> ((BoolSetting) s).set(bool);
+                case Item item      -> ((ItemSetting) s).set(item);
+                case Block block    -> ((BlockSetting) s).set(block);
+                case Enum<?> es     -> ((EnumSetting) s).set(es);
+                case null, default  -> { }
             }
-        } else {
-            ChatUtils.warning("Module %d not found", new Object[]{moduleClass});
+        } catch (Exception e) {
+            throw new RuntimeException(e);
         }
     }
 
-    /** Sets the player's yaw/pitch to align the view with the current highway direction, pitch 30°. */
-    public static void alignLookToHighway() { // was: Bocqo9ajQ
-        assert (PlayerUtils.mc.player != null);
-        PlayerUtils.mc.player.setPitch(30.0f);
-        WorldUtils.Direction8 dir = HighwayBuilder.getDirection();
-        PlayerUtils.mc.player.setYaw(WorldUtils.Direction8.toYaw(dir));
+    /** Faces the current highway direction with a 30° downward pitch. */
+    public static void faceHighwayDirectionPitchDown() { // was: SOYyh5IPg26f7F()
+        assert mc.player != null;
+        mc.player.setPitch(30.0F);
+        WorldUtils.Direction8 direction = HighwayBuilder.getDirection();
+        mc.player.setYaw(WorldUtils.Direction8.toYaw(direction));
     }
 
-    /**
-     * Configures the GatherItem module to collect the given item, then enables it
-     * if it is not already active.
-     */
-    public static void startGatherItem(Item item, boolean unused) { // was: jOdDDFXSeWl4(Item,boolean)
-        PlayerUtils.setModuleSetting(GatherItem.class, "item", item);
-        Module module = Modules.get().get(GatherItem.class);
-        if (!PlayerUtils.isGatheringItem()) {
-            module.toggle();
-        }
+    /** Faces the current highway direction (yaw only). */
+    public static void faceHighwayDirection() { // was: rKbT3Ifwo()
+        assert mc.player != null;
+        WorldUtils.Direction8 direction = HighwayBuilder.getDirection();
+        mc.player.setYaw(WorldUtils.Direction8.toYaw(direction));
     }
 
-    /** No-op stub. */
-    public static void noOp(boolean unused) {} // was: usJLOV0subXO3(boolean)
+    /** Enables the GatherItem module to collect the given item. */
+    public static void gatherItem(Item item, boolean paveAfterwards) { // was: FvaNWO(Item,boolean)
+        setModuleSetting(GatherItem.class, "item", item);
+        Module gatherItem = Modules.get().get(GatherItem.class);
+        if (!isGatheringItem()) gatherItem.toggle();
+    }
 
-    /** Sets the pressed state of the given KeyBinding via Meteor's Input helper. */
-    public static void setKeyState(KeyBinding key, boolean pressed) { // was: jOdDDFXSeWl4(KeyBinding,boolean)
+    public static void unusedPaveHook(boolean paveAfter) { } // was: psJq59YIbp3Z(boolean) (empty)
+
+    public static void setKeyPressed(KeyBinding key, boolean pressed) { // was: FvaNWO(KeyBinding,boolean)
         key.setPressed(pressed);
         Input.setKeyState(key, pressed);
     }
 
-    /** Returns true if the GatherItem module is currently active. */
-    public static boolean isGatheringItem() { // was: BT1BimvycZZjsYS
-        return Modules.get().get(GatherItem.class).isActive();
+    public static boolean isGatheringItem() { // was: r7hOYIKN2()
+        return ((GatherItem) Modules.get().get(GatherItem.class)).isActive();
     }
 
-    /**
-     * Applies strafe (left/right) key presses to keep the player centered on the
-     * highway axis. Uses HighwayState's target X/Z alignment coordinates.
-     */
-    public static void applyStrafing() { // was: quFLaIBj1UQn6g
-        if (PlayerUtils.mc.player == null || PlayerUtils.mc.world == null) return;
+    /** Presses A/D to keep the player centered on the highway's build line. */
+    public static void strafeToCenterline() { // was: oZHMlTL()
+        if (mc.player == null || mc.world == null) return;
         HighwayState state = HighwayState.getInstance();
-        boolean strafeRight = false;
-        boolean strafeLeft  = false;
-        // North/South highway: align on X axis
-        if (state.getDirection() == WorldUtils.Direction8.NORTH
-                || state.getDirection() == WorldUtils.Direction8.SOUTH) {
-            double playerX = VersionHelper.get().getPlayerPos().getX();
-            if (state.getDirection() == WorldUtils.Direction8.NORTH) {
-                if (playerX > state.getAlignX() + 0.13) strafeLeft  = true;
-                else if (playerX < state.getAlignX() - 0.13) strafeRight = true;
-            } else {
-                if (playerX < state.getAlignX() - 0.13) strafeLeft  = true;
-                else if (playerX > state.getAlignX() + 0.13) strafeRight = true;
+        boolean pressD = false, pressA = false;
+        WorldUtils.Direction8 dir = state.getDirection();
+        if (dir == WorldUtils.Direction8.NORTH || dir == WorldUtils.Direction8.SOUTH) {
+            double currentX = VersionHelper.get().getPlayerPos().getX();
+            if (dir == WorldUtils.Direction8.NORTH) {
+                if (currentX > state.getLastX() + 0.15) pressA = true;
+                else if (currentX < state.getLastX() - 0.15) pressD = true;
+            } else if (currentX < state.getLastX() - 0.15) pressA = true;
+            else if (currentX > state.getLastX() + 0.15) pressD = true;
+        } else if (dir == WorldUtils.Direction8.EAST || dir == WorldUtils.Direction8.WEST) {
+            double currentZ = VersionHelper.get().getPlayerPos().getZ();
+            if (dir == WorldUtils.Direction8.EAST) {
+                if (currentZ > state.getLastZ() + 0.15) pressA = true;
+                else if (currentZ < state.getLastZ() - 0.15) pressD = true;
+            } else if (currentZ < state.getLastZ() - 0.15) pressA = true;
+            else if (currentZ > state.getLastZ() + 0.15) pressD = true;
+        }
+        setKeyPressed(mc.options.rightKey, pressD);
+        setKeyPressed(mc.options.leftKey, pressA);
+    }
+
+    /** If off-axis, paths back onto the highway centre block. */
+    public static void alignToHighway() { // was: xQr5FhbwpQPWgIQ()
+        HighwayState state = HighwayState.getInstance();
+        if (state.getPendingBreakPos() != null) return;
+        assert mc.player != null;
+        if (state.getCenterX() != null && state.getCenterY() != null && state.getCenterZ() != null) {
+            int ax = state.getCenterX(), ay = state.getCenterY(), az = state.getCenterZ();
+            int ddx = mc.player.getBlockX() - ax;
+            int ddz = mc.player.getBlockZ() - az;
+            if (Math.abs(ddx) != Math.abs(ddz)) {
+                PathingHelper.setGoal(new GoalBlock(ax, ay, az));
+                MusheorSystem.debug("Aligning player to the highway");
             }
-        // East/West highway: align on Z axis
-        } else if (state.getDirection() == WorldUtils.Direction8.WEST
-                || state.getDirection() == WorldUtils.Direction8.EAST) {
-            double playerZ = VersionHelper.get().getPlayerPos().getZ();
-            if (state.getDirection() == WorldUtils.Direction8.WEST) {
-                if (playerZ > state.getAlignZ() + 0.13) strafeLeft  = true;
-                else if (playerZ < state.getAlignZ() - 0.13) strafeRight = true;
-            } else {
-                if (playerZ < state.getAlignZ() - 0.13) strafeLeft  = true;
-                else if (playerZ > state.getAlignZ() + 0.13) strafeRight = true;
+        }
+    }
+
+    /** Corrects lateral drift off the highway line using a Baritone goal. */
+    public static void correctDrift() { // was: OMMZL1F3q()
+        assert mc.player != null;
+        HighwayState state = HighwayState.getInstance();
+        if (mc.player.getBlockZ() != 0
+            && (WorldUtils.getMovementDirection() == WorldUtils.Direction8.EAST
+             || WorldUtils.getMovementDirection() == WorldUtils.Direction8.WEST)) {
+            double difference = mc.player.getZ() - state.getLastZ();
+            if (difference > 0.6) {
+                Goal goal = new GoalBlock(mc.player.getBlockX(), state.getCenterY(), state.getLastZ().intValue());
+                BaritoneAPI.getProvider().getPrimaryBaritone().getCustomGoalProcess().setGoalAndPath(goal);
+                MusheorSystem.debug("Aligning player to the highway");
+                return;
             }
         }
-        PlayerUtils.setKeyState(PlayerUtils.mc.options.rightKey, strafeRight);
-        PlayerUtils.setKeyState(PlayerUtils.mc.options.leftKey,  strafeLeft);
-    }
-
-    /**
-     * Uses Baritone's GoalBlock to realign the player to the highway grid if they
-     * are more than 1 block off-axis.
-     */
-    public static void alignWithBaritone() { // was: uFghvYncEwFBHmJL
-        HighwayState state = HighwayState.getInstance();
-        if (state.getLavaTargetBlock() != null) return;
-        assert (PlayerUtils.mc.player != null);
-        if (state.getAlignStartX() != 0 && state.getHighwayY() != 0
-                && PlayerUtils.mc.player.getX() != 0
-                && PlayerUtils.mc.player.getZ() != 0
-                && (Math.abs(PlayerUtils.mc.player.getX()) % Math.abs(state.getAlignStartX()) > 1
-                 || Math.abs(PlayerUtils.mc.player.getZ()) % Math.abs(state.getAlignStartZ()) > 1)) {
-            GoalBlock goal = new GoalBlock(
-                state.getAlignStartX().intValue(),
-                state.getHighwayY().intValue(),
-                state.getAlignStartZ().intValue());
-            PathingHelper.setBaritoneGoal((Goal) goal);
-            PathingHelper.startPathing();
-            MusheorSystem.debug("Aligning player to the highway", new Object[0]);
+        if (mc.player.getBlockX() != 0
+            && (WorldUtils.getMovementDirection() == WorldUtils.Direction8.NORTH
+             || WorldUtils.getMovementDirection() == WorldUtils.Direction8.SOUTH)) {
+            double difference = mc.player.getX() - state.getLastX();
+            if (difference > 0.6) {
+                Goal goal = new GoalXZ(state.getLastX().intValue(), mc.player.getBlockZ());
+                BaritoneAPI.getProvider().getPrimaryBaritone().getCustomGoalProcess().setGoalAndPath(goal);
+                MusheorSystem.debug("Aligning player to the highway");
+                return;
+            }
         }
     }
 
-    /**
-     * Alternative alignment: if the player is more than 0.5 blocks off-axis (XZ),
-     * uses Baritone's custom goal to path to the correct lane position.
-     */
-    public static void alignWithBaritoneXZ() { // was: HUYtvX
-        assert (PlayerUtils.mc.player != null);
-        HighwayState state = HighwayState.getInstance();
-        double offset;
-        // East/West alignment: correct Z position
-        if (PlayerUtils.mc.player.getZ() != 0
-                && (WorldUtils.getPlayerFacing() == WorldUtils.Direction8.WEST
-                 || WorldUtils.getPlayerFacing() == WorldUtils.Direction8.EAST)
-                && (offset = PlayerUtils.mc.player.getZ() - state.getAlignZ()) > 0.5) {
-            GoalBlock goal = new GoalBlock(
-                PlayerUtils.mc.player.getX(),
-                state.getHighwayY().intValue(),
-                state.getAlignZ().intValue());
-            BaritoneAPI.getProvider().getPrimaryBaritone()
-                .getCustomGoalProcess().setGoalAndPath((Goal) goal);
-            MusheorSystem.debug("Aligning player to the highway", new Object[0]);
-            return;
-        }
-        // North/South alignment: correct X position
-        if (PlayerUtils.mc.player.getX() != 0
-                && (WorldUtils.getPlayerFacing() == WorldUtils.Direction8.NORTH
-                 || WorldUtils.getPlayerFacing() == WorldUtils.Direction8.SOUTH)
-                && (offset = PlayerUtils.mc.player.getX() - state.getAlignX()) > 0.5) {
-            GoalXZ goal = new GoalXZ(state.getAlignX().intValue(), PlayerUtils.mc.player.getZ());
-            BaritoneAPI.getProvider().getPrimaryBaritone()
-                .getCustomGoalProcess().setGoalAndPath((Goal) goal);
-            MusheorSystem.debug("Aligning player to the highway", new Object[0]);
-        }
-    }
-
-    /**
-     * Sends a teleport-request command ("/msg targetPlayer !tp token") to the server.
-     * Uses musheor.plus.PlusPlayerUtils via reflection for IRC-based sending if available,
-     * otherwise falls back to a CommandExecutionC2SPacket for the /msg command.
-     */
-    public static void sendTeleportMessage(String targetPlayer, int tokenLength) { // was: jOdDDFXSeWl4(String,int)
-        assert (PlayerUtils.mc.player != null);
-        String token = UUID.randomUUID().toString().substring(0, tokenLength);
-        String command = "!tp " + token;
-        if (!VersionHelper.get().onSameServer(targetPlayer)) {
-            ChatUtils.error("Cannot find %s, not online?!", new Object[]{targetPlayer});
+    /** Sends a "!tp <token>" teleport-request message to another player (used by .tp). */
+    public static void sendTeleportMessage(String playerIGN, int length) { // was: FvaNWO(String,int)
+        String command = "!tp " + MessageInteract.randomToken(length);
+        if (!VersionHelper.get().onSameServer(playerIGN)) {
+            ChatUtils.error("Cannot find %s, not online?!", new Object[]{playerIGN});
             return;
         }
         try {
+            // Optional paid "plus" module: send via IRC PM if present.
             Class.forName("musheor.plus.PlusPlayerUtils")
                 .getMethod("trySendIrcPm", String.class, String.class)
-                .invoke(null, targetPlayer, command);
-        } catch (Exception e) {
-            PlayerUtils.mc.player.networkHandler.sendPacket(
-                (Packet) new CommandExecutionC2SPacket("msg " + targetPlayer + " " + command));
+                .invoke(null, playerIGN, command);
+        } catch (Exception ignored) {
+            // Fallback: normal /msg command.
+            mc.player.networkHandler.sendPacket(new CommandExecutionC2SPacket("msg " + playerIGN + " " + command));
         }
     }
 }

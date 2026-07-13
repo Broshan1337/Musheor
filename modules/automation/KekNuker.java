@@ -1,20 +1,21 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// Class name was already readable; internal members were obfuscated.
 package musheor.modules.automation;
 
 import baritone.api.BaritoneAPI;
 import baritone.api.IBaritone;
-import baritone.api.pathing.goals.Goal;
 import baritone.api.pathing.goals.GoalNear;
 import baritone.api.selection.ISelection;
 import baritone.api.selection.ISelectionManager;
-import baritone.api.utils.BetterBlockPos;
 import java.awt.Color;
-import java.lang.runtime.SwitchBootstraps;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
 import meteordevelopment.meteorclient.events.world.TickEvent;
 import meteordevelopment.meteorclient.renderer.ShapeMode;
@@ -31,439 +32,639 @@ import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
+import musheor.musheor;
 import musheor.compat.LitematicaHelper;
-import musheor.modules.automation.HighwayBuilder;
 import musheor.modules.features.KekMine;
 import musheor.modules.hud.HudInfoPlus;
-import musheor.musheor;
+import musheor.utils.BlockPositions;
 import musheor.utils.RenderUtils;
 import musheor.utils.WorldUtils;
+import musheor.utils.internal.HighwayLocator;
+import musheor.utils.internal.HighwayState;
 import musheor.utils.internal.PathingHelper;
 import musheor.utils.system.MusheorSystem;
-import net.minecraft.Block;
-import net.minecraft.BlockPos;
-import net.minecraft.BlockPos;
-import net.minecraft.Vec3d;
-import net.minecraft.BlockState;
-import net.minecraft.MinecraftClient;
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.ChunkPos;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.Vec3d;
+import net.minecraft.util.math.Vec3i;
 
-public class KekNuker
-extends Module {
-    private final SettingGroup sgGeneral;
-    private final SettingGroup sgRender;
-    private static final MinecraftClient mc = MinecraftClient.getInstance();
-    public static KekNuker INSTANCE;
-    public final Setting<NukerMode> nukerMode;
-    private final Setting<Boolean> ignoreAir;
-    private final Setting<Boolean> pathfind;
-    private final Setting<Integer> pathfindChunkRange;
-    public final Setting<Shape> shape;
-    private final Setting<SortMode> sortMode;
-    private final Setting<Boolean> flatten;
-    public final Setting<Double> range;
-    private final Setting<Boolean> avoidSpillingLiquid;
-    private final Setting<Boolean> noPacketKick;
-    public final Setting<Integer> bpt;
-    private final Setting<ListMode> listMode;
-    private final Setting<List<Block>> whitelist;
-    private final Setting<List<Block>> blacklist;
-    private final Setting<Boolean> globalRendering;
-    private final Setting<SettingColor> renderColor;
-    public static List<BlockPos> targetBlocks;
-    private List<BlockPos> breakQueue;
-    public static final Map<BlockPos, Integer> TZa5O0xAoIaC;
-    private BlockPos lastPathfindTarget;
-    private int tickCount;
+/**
+ * "kek-nuker" — mines every eligible block around the player. Supports four target
+ * sources ({@link NukerMode}): a radius scan, a queue driven externally by
+ * {@link HighwayBuilder} ({@code SMART}), the wrong blocks of a loaded Litematica
+ * schematic, or a Baritone selection. Breaking is delegated to {@link KekMine} when
+ * that module is active (packet mining), otherwise to {@link BlockUtils#breakBlock}.
+ * Optionally auto-pathfinds (via Baritone) to the nearest breakable block when nothing
+ * is in range.
+ */
+public class KekNuker extends Module {
+    private final SettingGroup sgGeneral = this.settings.getDefaultGroup();    // was: xQr5FhbwpQPWgIQ
+    private final SettingGroup sgPathfind = this.settings.createGroup("Pathfind"); // was: OMMZL1F3q
+    private final SettingGroup sgRender = this.settings.createGroup("Render");  // was: zu3a44xDeMFMCRwm
+    private static final MinecraftClient mc = MinecraftClient.getInstance();   // was: krxNb5lcQuWA
+    public static KekNuker INSTANCE;                                            // was: FvaNWO (static)
+
+    public final Setting<NukerMode> nukerMode = sgGeneral.add(new EnumSetting.Builder<NukerMode>() // was: Q90GLXQ0Pef
+        .name("nuker-mode").defaultValue(NukerMode.Normal).build());
+    private final Setting<LayerType> layerType = sgGeneral.add(new EnumSetting.Builder<LayerType>() // was: nt0HZnvBBp
+        .name("layer-type").description("Controls where blocks are allowed to be broken (layer handling)")
+        .defaultValue(LayerType.AboveFeet).visible(() -> nukerMode.get() != NukerMode.Smart).build());
+    private final Setting<SortMode> sortMode = sgGeneral.add(new EnumSetting.Builder<SortMode>() // was: amz3UB1vE
+        .name("sort-mode").description("Choose what order to mine the blocks in").defaultValue(SortMode.Closest).build());
+    public final Setting<Shape> shape = sgGeneral.add(new EnumSetting.Builder<Shape>() // was: psJq59YIbp3Z
+        .name("shape").defaultValue(Shape.Sphere).visible(() -> nukerMode.get() != NukerMode.Smart).build());
+    public final Setting<Double> range = sgGeneral.add(new DoubleSetting.Builder() // was: SOYyh5IPg26f7F
+        .name("range").defaultValue(5.5).min(2.0).max(8.0).decimalPlaces(1).build());
+    private final Setting<Boolean> belowFeetLast = sgGeneral.add(new BoolSetting.Builder() // was: sBBIyQG5NWq0K
+        .name("below-feet-last").description("Makes it so the block you are standing on is only mined when all other blocks in range are broken")
+        .defaultValue(false).visible(() -> nukerMode.get() != NukerMode.Smart).build());
+    private final Setting<Boolean> ignoreAir = sgGeneral.add(new BoolSetting.Builder() // was: sZkZ1izAy
+        .name("ignore-air").description("Ignores air blocks in the schematic.")
+        .visible(() -> LitematicaHelper.isLoaded() && nukerMode.get() == NukerMode.Litematica).defaultValue(false).build());
+    private final Setting<Boolean> avoidSpillingLiquids = sgGeneral.add(new BoolSetting.Builder() // was: QYKUhjp
+        .name("avoid-spilling-liquids").description("Prevents you from mining blocks that will cause liquid to flow everywhere")
+        .defaultValue(true).build());
+    private final Setting<Boolean> preventPacketKick = sgGeneral.add(new BoolSetting.Builder() // was: NIz4xic3Js9
+        .name("prevent-packet-kick").description("+100000 aura setting").defaultValue(true).build());
+    public final Setting<Integer> blocksPerTick = sgGeneral.add(new IntSetting.Builder() // was: rKbT3Ifwo
+        .name("blocks-per-tick").description("Maximum blocks to try to break per tick. (Only for instant-breakable-blocks)")
+        .defaultValue(35).min(1).sliderRange(1, 100).build());
+    private final Setting<ListMode> listMode = sgGeneral.add(new EnumSetting.Builder<ListMode>() // was: u1WFwbQRSKa
+        .name("list-mode").description("Selection mode").defaultValue(ListMode.None).build());
+    private final Setting<List<Block>> whitelist = sgGeneral.add(new BlockListSetting.Builder() // was: LGDfbZq
+        .name("whitelist").description("The blocks you want to mine.").defaultValue()
+        .visible(() -> listMode.get() == ListMode.Whitelist).build());
+    private final Setting<List<Block>> blacklist = sgGeneral.add(new BlockListSetting.Builder() // was: to3T8DJCDVX8po
+        .name("blacklist").description("The blocks you don't want to mine.").defaultValue()
+        .visible(() -> listMode.get() == ListMode.Blacklist).build());
+
+    private final Setting<Boolean> autoPathfind = sgPathfind.add(new BoolSetting.Builder() // was: Sd3jEwKuGABy
+        .name("auto-pathfind").description("Automatically pathfinds when no blocks are in range")
+        .defaultValue(false).visible(() -> nukerMode.get() != NukerMode.Smart).build());
+    private final Setting<Integer> pathfindChunkRange = sgPathfind.add(new IntSetting.Builder() // was: kJfFkD47Vh
+        .name("pathfind-chunk-range").description("Maximum range in chunks the pathfinder can scan for more blocks to break")
+        .defaultValue(4).sliderMax(8).visible(() -> nukerMode.get() != NukerMode.Smart).build());
+    private final Setting<Integer> chunksPerTick = sgPathfind.add(new IntSetting.Builder() // was: ubHptFBRn5bO
+        .name("chunks-per-tick").description("How many chunks to scan per tick when searching for more blocks. Higher values find targets faster at the cost of CPU per tick.")
+        .defaultValue(2).min(1).sliderMax(8).visible(() -> nukerMode.get() != NukerMode.Smart).build());
+
+    private final Setting<Boolean> globalRendering = sgRender.add(new BoolSetting.Builder() // was: apOpfoOHr3fJVwT
+        .name("global-rendering").defaultValue(true).description("Synchronize rendering with Musheor-Tab").build());
+    private final Setting<SettingColor> color = sgRender.add(new ColorSetting.Builder() // was: hq1pN0qY
+        .name("color").defaultValue(new SettingColor(Color.cyan)).description("Custom color for rendering (lines / wireframe)")
+        .visible(() -> !globalRendering.get()).build());
+
+    /** Extra positions pushed in by {@link HighwayBuilder}/Handlers for SMART mode to break. */
+    public static List<BlockPos> extraBreakQueue = new ArrayList<>();          // was: r7hOYIKN2 (public static)
+    /** Filtered, sorted positions actually mined and rendered this tick. */
+    private static List<BlockPos> mineTargets = new ArrayList<>();             // was: ptxWcpd1WV763T5 (private static)
+    /** pos -> tick it was last dispatched, used to throttle rebreak attempts. */
+    public static final Map<BlockPos, Integer> breakTimeouts = new HashMap<>(); // was: oZHMlTL (public static final)
+
+    private int tickCounter;                 // was: DnAk86nuI
+    private int scanRing = -1;               // was: LlN8EpIZKbk  (current ring radius in the spiral chunk scan)
+    private int scanIndex = 0;               // was: pgjj9cLYUTE5g (index within the current ring)
+    private BlockPos pathTarget = null;      // was: IeStEJRJ9eb3l (block we are pathing toward)
+    private BlockPos bestScanCandidate = null; // was: sFazojak6ig8QgGq (closest candidate found so far while scanning)
+    private boolean wasMining = false;       // was: ewq603nIlCd9Gbu
 
     public KekNuker() {
         super(musheor.AUTOMATION, "kek-nuker", "Mines blocks in radius of the player");
-        this.sgGeneral = this.settings.getDefaultGroup();
-        this.sgRender = this.settings.createGroup("Render");
-        this.nukerMode = this.sgGeneral.add((Setting)((EnumSetting.Builder)((EnumSetting.Builder)new EnumSetting.Builder().name("nuker-mode")).defaultValue((Object)NukerMode.Normal)).build());
-        this.ignoreAir = this.sgGeneral.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("ignore-air")).description("Ignores air blocks in the schematic.")).visible(() -> LitematicaHelper.isLoaded() && this.nukerMode.get() == NukerMode.Litematica)).defaultValue((Object)false)).build());
-        this.pathfind = this.sgGeneral.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("auto-pathfind")).description("Automatically pathfinds when no blocks are in range")).defaultValue((Object)true)).visible(() -> this.nukerMode.get() != NukerMode.Highway)).build());
-        this.pathfindChunkRange = this.sgGeneral.add((Setting)((IntSetting.Builder)((IntSetting.Builder)((IntSetting.Builder)((IntSetting.Builder)new IntSetting.Builder().name("pathfind-chunk-range")).description("Maximum range in chunks the pathfinder can scan for more blocks to break")).defaultValue((Object)2)).sliderMax(8).visible(() -> this.nukerMode.get() != NukerMode.Highway)).build());
-        this.shape = this.sgGeneral.add((Setting)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)new EnumSetting.Builder().name("shape")).defaultValue((Object)Shape.Cube)).visible(() -> this.nukerMode.get() != NukerMode.Highway)).build());
-        this.sortMode = this.sgGeneral.add((Setting)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)new EnumSetting.Builder().name("sort-mode")).description("Choose what order to mine the blocks in")).defaultValue((Object)SortMode.Closest)).build());
-        this.flatten = this.sgGeneral.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("flatten")).description("Flattens the area by not mining below the player's feet")).defaultValue((Object)true)).visible(() -> this.nukerMode.get() != NukerMode.Highway)).build());
-        this.range = this.sgGeneral.add((Setting)((DoubleSetting.Builder)((DoubleSetting.Builder)new DoubleSetting.Builder().name("range")).defaultValue(1.0).min(2.0).max(8.0).decimalPlaces(1).visible(() -> this.nukerMode.get() != NukerMode.Highway)).build());
-        this.avoidSpillingLiquid = this.sgGeneral.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("avoid-spilling-liquids")).description("Prevents you from mining blocks that will cause liquid to flow everywhere")).defaultValue((Object)true)).build());
-        this.noPacketKick = this.sgGeneral.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("prevent-packet-kick")).description("+100000 aura setting")).defaultValue((Object)true)).build());
-        this.bpt = this.sgGeneral.add((Setting)((IntSetting.Builder)((IntSetting.Builder)((IntSetting.Builder)new IntSetting.Builder().name("blocks-per-tick")).description("Maximum blocks to try to break per tick. (Only for instant-breakable-blocks)")).defaultValue((Object)1)).min(1).sliderRange(1, 50).build());
-        this.listMode = this.sgGeneral.add((Setting)((EnumSetting.Builder)((EnumSetting.Builder)((EnumSetting.Builder)new EnumSetting.Builder().name("list-mode")).description("Selection mode.")).defaultValue((Object)ListMode.All)).build());
-        this.whitelist = this.sgGeneral.add((Setting)((BlockListSetting.Builder)((BlockListSetting.Builder)((BlockListSetting.Builder)new BlockListSetting.Builder().name("whitelist")).description("The blocks you want to mine.")).defaultValue(new Block[0]).visible(() -> this.listMode.get() == ListMode.Whitelist)).build());
-        this.blacklist = this.sgGeneral.add((Setting)((BlockListSetting.Builder)((BlockListSetting.Builder)((BlockListSetting.Builder)new BlockListSetting.Builder().name("blacklist")).description("The blocks you don't want to mine.")).defaultValue(new Block[0]).visible(() -> this.listMode.get() == ListMode.Blacklist)).build());
-        this.globalRendering = this.sgRender.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("global-rendering")).defaultValue((Object)true)).description("Synchronize rendering with Musheor-Tab")).build());
-        this.renderColor = this.sgRender.add((Setting)((ColorSetting.Builder)((ColorSetting.Builder)((ColorSetting.Builder)new ColorSetting.Builder().name("color")).defaultValue(new SettingColor(Color.cyan)).description("Custom color for rendering (lines / wireframe)")).visible(() -> (Boolean)this.globalRendering.get() == false)).build());
-        this.breakQueue = new ArrayList<BlockPos>();
-        this.lastPathfindTarget = null;
         INSTANCE = this;
     }
 
-    public static boolean isBreaking() {
-        return !targetBlocks.isEmpty() && INSTANCE.isActive() || KekMine.INSTANCE.isQueueActive();
+    /** The configured block blacklist (used by Handlers to avoid breaking protected blocks). */
+    public static List<Block> getBlacklist() { // was: FvaNWO()
+        return INSTANCE.blacklist.get();
     }
 
-    public static List<Block> t018N0() {
-        return (List)KekNuker.INSTANCE.blacklist.get();
-    }
-
+    @Override
     public void onActivate() {
-        TZa5O0xAoIaC.clear();
-        this.lastPathfindTarget = null;
-        this.tickCount = 0;
+        breakTimeouts.clear();
+        this.tickCounter = 0;
+        this.scanRing = -1;
+        this.scanIndex = 0;
+        this.pathTarget = null;
+        this.bestScanCandidate = null;
+        this.wasMining = false;
     }
 
+    @Override
     public void onDeactivate() {
-        targetBlocks.clear();
-        this.breakQueue.clear();
-        KekMine.INSTANCE.miningQueue.clear();
-        this.lastPathfindTarget = null;
-        if (PathingHelper.isAlreadyPathing() && ((Boolean)this.pathfind.get()).booleanValue()) {
-            PathingHelper.Farthest();
+        extraBreakQueue.clear();
+        mineTargets.clear();
+        KekMine.INSTANCE.mineQueue.clear();
+        this.pathTarget = null;
+        this.bestScanCandidate = null;
+        this.scanRing = -1;
+        if (this.autoPathfind.get() && (PathingHelper.isPathing() || PathingHelper.hasPath())) {
+            PathingHelper.cancelEverything();
         }
     }
 
     @EventHandler
-    public void onTick(TickEvent.Pre pre) {
-        if (KekNuker.mc.player == null || KekNuker.mc.world == null) {
-            return;
-        }
-        if (HighwayBuilder.isEating()) {
-            return;
-        }
-        ++this.tickCount;
-        TZa5O0xAoIaC.entrySet().removeIf(entry -> {
-            if (KekNuker.mc.world.getBlockState((BlockPos)entry.getKey()).isAir()) {
-                return true;
-            }
-            return this.tickCount - (Integer)entry.getValue() > (Integer)MusheorSystem.Manager.rebreakTimeout.get();
-        });
-        Module module = Modules.get().get(KekMine.class);
+    public void onTick(TickEvent.Pre event) { // was: FvaNWO(Pre)
+        if (mc.player == null || mc.world == null) return;
+        if (HighwayBuilder.isEating()) return;
+
+        this.tickCounter++;
+        breakTimeouts.entrySet().removeIf(entry ->
+            mc.world.getBlockState(entry.getKey()).isAir()
+                || this.tickCounter - entry.getValue() > MusheorSystem.Manager.rebreakTimeout.get());
+        Module kekMine = Modules.get().get(KekMine.class);
+
+        // 1) Collect candidate positions for the active mode.
         if (this.nukerMode.get() == NukerMode.Normal) {
-            targetBlocks.clear();
-            targetBlocks = this.getBlocksInArea((Shape)((Object)this.shape.get()), (Double)this.range.get());
+            extraBreakQueue.clear();
+            extraBreakQueue = this.getBlocksInShape(this.shape.get(), this.range.get());
         } else if (this.nukerMode.get() == NukerMode.Litematica) {
             if (!LitematicaHelper.isLoaded()) {
-                this.warning("Litematica is not installed. Install Litematica or switch to another mode.", new Object[0]);
+                this.warning("Litematica is not installed. Install Litematica or switch to another mode.");
                 this.toggle();
                 return;
             }
-            targetBlocks.clear();
-            targetBlocks.addAll(LitematicaHelper.get().getWrongSchematicBlocks((Double)this.range.get(), (Boolean)this.ignoreAir.get()));
-        } else if (this.nukerMode.get() == NukerMode.AirFarm) {
-            targetBlocks.clear();
-            targetBlocks.addAll(this.getAirFarmBlocks());
+            extraBreakQueue.clear();
+            extraBreakQueue.addAll(LitematicaHelper.get().getWrongSchematicBlocks(this.range.get(), this.ignoreAir.get()));
+        } else if (this.nukerMode.get() == NukerMode.Selection) {
+            extraBreakQueue.clear();
+            extraBreakQueue.addAll(this.getSelectionBlocks());
         }
-        this.breakQueue.clear();
-        for (BlockPos BlockPos3 : targetBlocks) {
-            BlockState BlockState2 = KekNuker.mc.world.getBlockState(BlockPos3);
-            if (this.nukerMode.get() != NukerMode.Highway && ((Boolean)this.flatten.get()).booleanValue() && BlockPos3.getY() < KekNuker.mc.player.getBlockPos().getY() || BlockState2.isLiquid() || BlockState2.isAir() || !BlockUtils.canBreak((BlockPos)BlockPos3) || ((Boolean)this.avoidSpillingLiquid.get()).booleanValue() && WorldUtils.hasAdjacentSolid(BlockPos3) || !WorldUtils.isWithinDistance(BlockPos3, (Double)this.range.get()) || this.listMode.get() != ListMode.All && (this.listMode.get() == ListMode.Whitelist && !((List)this.whitelist.get()).contains(BlockState2.getBlock()) || this.listMode.get() == ListMode.Blacklist && ((List)this.blacklist.get()).contains(BlockState2.getBlock()))) continue;
-            this.breakQueue.add(BlockPos3);
-        }
-        BlockPos BlockPos4 = (SortMode)((Object)this.sortMode.get());
-        int n = 0;
-        switch (SwitchBootstraps.enumSwitch("enumSwitch", new Object[]{"Closest", "Furthest", "TopDown", "BottomUp"}, BlockPos4, n)) {
-            case 0: {
-                this.breakQueue.sort(Comparator.comparingDouble(BlockPos2 -> KekNuker.mc.player.squaredDistanceTo(Vec3d.ofCenter((BlockPos)BlockPos2))));
-                break;
-            }
-            case 1: {
-                this.breakQueue.sort(Comparator.comparingDouble(BlockPos2 -> -KekNuker.mc.player.squaredDistanceTo(Vec3d.ofCenter((BlockPos)BlockPos2))));
-                break;
-            }
-            case 2: {
-                this.breakQueue.sort(Comparator.comparingDouble(BlockPos2 -> -BlockPos2.getY()));
-                break;
-            }
-            case 3: {
-                this.breakQueue.sort(Comparator.comparingDouble(BlockPos::getY));
-                break;
+        // NukerMode.Smart intentionally leaves extraBreakQueue as-is (it is filled externally).
+
+        // 2) Filter candidates into the mine list.
+        mineTargets.clear();
+        for (BlockPos pos : extraBreakQueue) {
+            BlockState state = mc.world.getBlockState(pos);
+            if ((this.nukerMode.get() == NukerMode.Smart
+                    || (this.layerType.get() != LayerType.AboveFeet || pos.getY() >= mc.player.getBlockPos().getY())
+                       && (this.layerType.get() != LayerType.RenderLayer || LitematicaHelper.get().isPositionInRenderLayer(pos)))
+                && !state.isLiquid()
+                && !state.isAir()
+                && BlockUtils.canBreak(pos)
+                && (!this.avoidSpillingLiquids.get() || !WorldUtils.hasAdjacentLiquid(pos))
+                && !(squaredDistanceToBox(mc.player.getEyePos(), pos) > this.range.get() * this.range.get())
+                && (this.listMode.get() == ListMode.None
+                    || (this.listMode.get() != ListMode.Whitelist || this.whitelist.get().contains(state.getBlock()))
+                       && (this.listMode.get() != ListMode.Blacklist || !this.blacklist.get().contains(state.getBlock())))) {
+                mineTargets.add(pos);
             }
         }
-        if (this.breakQueue.isEmpty() && ((Boolean)this.pathfind.get()).booleanValue() && this.nukerMode.get() != NukerMode.Highway && (BlockPos4 = this.findPathfindTarget()) != null && !BlockPos4.equals((Object)this.lastPathfindTarget)) {
-            this.lastPathfindTarget = BlockPos4;
-            BaritoneAPI.getProvider().getPrimaryBaritone().getCustomGoalProcess().setGoalAndPath((Goal)new GoalNear(new BlockPos(BlockPos4.getX(), KekNuker.mc.player.getY(), BlockPos4.getZ()), 1));
-        }
-        if (!this.breakQueue.isEmpty()) {
-            int n2 = 0;
-            for (BlockPos BlockPos3 : this.breakQueue) {
-                BlockState BlockState2 = KekNuker.mc.world.getBlockState(BlockPos3);
-                if ((double)HudInfoPlus.XuSVOP3J5xFv() >= (double)((Integer)MusheorSystem.Manager.globalPacketLimit.get()).intValue() * 0.9 && ((Boolean)this.noPacketKick.get()).booleanValue()) break;
-                if (TZa5O0xAoIaC.containsKey(BlockPos3)) continue;
-                KekMine.MineContext mineContext = new KekMine.MineContext(BlockPos3, KekNuker.mc.world.getBlockState(BlockPos3), true);
-                if (module.isActive()) {
-                    if (!KekMine.INSTANCE.isQueueActive()) {
-                        if (mineContext.E74ay1CfIa1C1X6 || mineContext.yIXEDGFGtS9H) {
-                            KekMine.e5oi2ZF(BlockPos3);
-                            ++n2;
-                        } else {
-                            KekMine.INSTANCE.queueBlock(BlockPos3, BlockState2);
+
+        // 3) Sort the mine list.
+        sortPositions(mineTargets);
+        if (this.belowFeetLast.get()) moveBelowFeetToEnd(mineTargets);
+
+        // 4) When nothing is in range, optionally pathfind toward the nearest breakable block.
+        if (mineTargets.isEmpty() && this.autoPathfind.get() && this.nukerMode.get() != NukerMode.Smart) {
+            if (this.wasMining) {
+                this.wasMining = false;
+                this.scanRing = -1;
+                this.scanIndex = 0;
+                this.pathTarget = null;
+                this.bestScanCandidate = null;
+            }
+
+            if (this.pathTarget != null) {
+                if (WorldUtils.isWithinRange(this.pathTarget, this.range.get())) {
+                    PathingHelper.cancelEverything();
+                    this.pathTarget = null;
+                    this.bestScanCandidate = null;
+                    this.scanRing = 0;
+                    this.scanIndex = 0;
+                } else if (!PathingHelper.isPathing()) {
+                    BlockPos standPos = this.findStandPosition(this.pathTarget);
+                    if (standPos == null) {
+                        this.pathTarget = null;
+                        this.bestScanCandidate = null;
+                    } else {
+                        BaritoneAPI.getProvider().getPrimaryBaritone().getCustomGoalProcess().setGoalAndPath(new GoalNear(standPos, 1));
+                    }
+                }
+            } else {
+                if (this.scanRing == -1) {
+                    this.scanRing = 0;
+                    this.scanIndex = 0;
+                }
+                int maxChunkRadius = this.pathfindChunkRange.get();
+                ChunkPos playerChunk = mc.player.getChunkPos();
+
+                for (int i = 0; i < this.chunksPerTick.get() && this.scanRing <= maxChunkRadius && this.pathTarget == null; i++) {
+                    ChunkPos toScan = this.getRingChunk(playerChunk, this.scanRing, this.scanIndex);
+                    BlockPos candidate = this.findClosestBlockInChunk(toScan);
+                    if (candidate != null
+                        && (this.bestScanCandidate == null
+                            || mc.player.squaredDistanceTo(candidate.getX() + 0.5, candidate.getY() + 0.5, candidate.getZ() + 0.5)
+                               < mc.player.squaredDistanceTo(this.bestScanCandidate.getX() + 0.5, this.bestScanCandidate.getY() + 0.5, this.bestScanCandidate.getZ() + 0.5))) {
+                        this.bestScanCandidate = candidate;
+                    }
+
+                    int ringSize = this.scanRing == 0 ? 1 : 8 * this.scanRing;
+                    this.scanIndex++;
+                    if (this.scanIndex >= ringSize) {
+                        this.scanIndex = 0;
+                        this.scanRing++;
+                        if (this.bestScanCandidate != null) {
+                            BlockPos standPos = this.findStandPosition(this.bestScanCandidate);
+                            if (standPos != null) {
+                                this.pathTarget = this.bestScanCandidate;
+                                BaritoneAPI.getProvider().getPrimaryBaritone().getCustomGoalProcess().setGoalAndPath(new GoalNear(standPos, 1));
+                            }
+                            this.bestScanCandidate = null;
                         }
-                        TZa5O0xAoIaC.put(BlockPos3, this.tickCount);
                     }
-                } else {
-                    BlockUtils.breakBlock((BlockPos)BlockPos3, (boolean)true);
-                    ++n2;
-                    if (!BlockUtils.canInstaBreak((BlockPos)BlockPos3)) break;
                 }
-                if (n2 < (Integer)this.bpt.get()) continue;
-                break;
+            }
+        }
+
+        // 5) Dispatch breaks.
+        if (!mineTargets.isEmpty()) {
+            this.wasMining = true;
+            int count = 0;
+
+            for (BlockPos pos : mineTargets) {
+                BlockState state = mc.world.getBlockState(pos);
+                if (HudInfoPlus.getPacketCount() >= MusheorSystem.Manager.globalPacketLimit.get() * 0.9 && this.preventPacketKick.get()) {
+                    break;
+                }
+
+                if (!breakTimeouts.containsKey(pos)) {
+                    KekMine.MineContext ctx = new KekMine.MineContext(pos, mc.world.getBlockState(pos), true);
+                    if (kekMine.isActive()) {
+                        if (!KekMine.INSTANCE.isReadyToDequeue()) {
+                            Direction face = getClosestFace(mc.player.getEyePos(), pos);
+                            if (!ctx.instaBreak && !ctx.reachedThreshold) {
+                                KekMine.INSTANCE.mine(pos, state, face);
+                            } else {
+                                KekMine.breakBlock(pos, face);
+                                count++;
+                            }
+                            breakTimeouts.put(pos, this.tickCounter);
+                        }
+                    } else {
+                        BlockUtils.breakBlock(pos, true);
+                        count++;
+                        if (!BlockUtils.canInstaBreak(pos)) break;
+                    }
+
+                    if (count >= this.blocksPerTick.get()) break;
+                }
+            }
+
+            // Re-sort KekMine's own pending queue to match our sort order.
+            if (kekMine.isActive() && !KekMine.INSTANCE.mineQueue.isEmpty()) {
+                List<BlockPos> queueList = new ArrayList<>(KekMine.INSTANCE.mineQueue);
+                sortPositions(queueList);
+                if (this.belowFeetLast.get()) moveBelowFeetToEnd(queueList);
+                KekMine.INSTANCE.mineQueue.clear();
+                KekMine.INSTANCE.mineQueue.addAll(queueList);
             }
         }
     }
 
-    private List<BlockPos> getBlocksInArea(Shape shape, double d) {
-        ArrayList<BlockPos> arrayList = new ArrayList<BlockPos>();
-        Vec3d Vec3d2 = KekNuker.mc.player.getEyePos();
-        int n = (int)Math.ceil(d);
-        for (int i = -n; i <= n; ++i) {
-            for (int j = -n; j <= n; ++j) {
-                for (int k = -n; k <= n; ++k) {
-                    BlockPos BlockPos2 = BlockPos.ofFloored((double)(Vec3d2.x + (double)i), (double)(Vec3d2.y + (double)j), (double)(Vec3d2.z + (double)k));
-                    if (!BlockUtils.canBreak((BlockPos)BlockPos2)) continue;
-                    if (shape == Shape.Cube) {
-                        if (!(Vec3d2.distanceTo(Vec3d.ofCenter((BlockPos)BlockPos2)) <= d)) continue;
-                        arrayList.add(BlockPos2);
-                        continue;
-                    }
-                    if (shape != Shape.Sphere) continue;
-                    arrayList.add(BlockPos2);
-                }
-            }
+    /** Sorts {@code list} in place according to the current {@link SortMode}. */
+    private void sortPositions(List<BlockPos> list) {
+        switch (this.sortMode.get()) {
+            case Closest -> list.sort(Comparator.comparingDouble(pos -> mc.player.squaredDistanceTo(Vec3d.ofCenter(pos))));
+            case Furthest -> list.sort(Comparator.comparingDouble(pos -> -mc.player.squaredDistanceTo(Vec3d.ofCenter(pos))));
+            case TopDown -> list.sort(Comparator.comparingDouble(pos -> -pos.getY()));
+            case BottomUp -> list.sort(Comparator.comparingDouble(Vec3i::getY));
+            case None -> { }
         }
-        return arrayList;
     }
 
-    private BlockPos findPathfindTarget() {
-        if (KekNuker.mc.player == null || KekNuker.mc.world == null) {
-            return null;
-        }
-        double d = KekNuker.mc.player.getX();
-        double d2 = KekNuker.mc.player.getZ();
-        int n = KekNuker.mc.player.getBlockPos().getY();
-        int n2 = n + (int)Math.floor((Double)this.range.get());
-        int n3 = KekNuker.mc.player.getChunkPos().x;
-        int n4 = KekNuker.mc.player.getChunkPos().z;
-        int n5 = (Integer)this.pathfindChunkRange.get();
-        List<BlockPos[]> list = null;
-        ISelection[] iSelectionArray = null;
-        if (this.nukerMode.get() == NukerMode.Litematica && LitematicaHelper.isLoaded()) {
-            list = LitematicaHelper.get().getSchematicRegionBounds();
-        } else if (this.nukerMode.get() == NukerMode.AirFarm) {
-            iSelectionArray = BaritoneAPI.getProvider().getPrimaryBaritone().getSelectionManager().getSelections();
-        }
-        ArrayList<int[]> arrayList = new ArrayList<int[]>();
-        for (int i = -n5; i <= n5; ++i) {
-            int n6 = -n5;
-            while (n6 <= n5) {
-                arrayList.add(new int[]{i, n6++});
-            }
-        }
-        arrayList.sort(Comparator.comparingDouble(nArray -> {
-            double d3 = (double)(n3 + nArray[0] << 4) + 8.0;
-            double d4 = (double)(n4 + nArray[1] << 4) + 8.0;
-            return (d3 - d) * (d3 - d) + (d4 - d2) * (d4 - d2);
-        }));
-        for (int[] nArray2 : arrayList) {
-            int n7 = n3 + nArray2[0] << 4;
-            int n8 = n4 + nArray2[1] << 4;
-            BlockPos BlockPos2 = null;
-            double d3 = Double.MAX_VALUE;
-            for (int i = n7; i < n7 + 16; ++i) {
-                for (int j = n8; j < n8 + 16; ++j) {
-                    for (int k = n; k < n2; ++k) {
-                        double d4;
-                        double d5;
-                        double d6;
-                        BlockPos BlockPos3 = new BlockPos(i, k, j);
-                        BlockPos BlockPos4 = new BlockPos(i, KekNuker.mc.player.getBlockPos().getY() - 1, j);
-                        BlockState BlockState2 = KekNuker.mc.world.getBlockState(BlockPos3);
-                        if (KekNuker.mc.world.getBlockState(BlockPos4).isAir() || BlockState2.isLiquid() || BlockState2.isAir() || ((Boolean)this.avoidSpillingLiquid.get()).booleanValue() && WorldUtils.hasAdjacentSolid(BlockPos3) || !BlockUtils.canBreak((BlockPos)BlockPos3) || this.listMode.get() == ListMode.Whitelist && !((List)this.whitelist.get()).contains(BlockState2.getBlock()) || this.listMode.get() == ListMode.Blacklist && ((List)this.blacklist.get()).contains(BlockState2.getBlock()) || list != null && !KekNuker.isInSchematicRegion(BlockPos3, list) || iSelectionArray != null && !KekNuker.isInSelection(BlockPos3, iSelectionArray) || !((d6 = (d5 = (double)i + 0.5 - d) * d5 + (d4 = (double)j + 0.5 - d2) * d4) < d3)) continue;
-                        d3 = d6;
-                        BlockPos2 = BlockPos3;
-                    }
-                }
-            }
-            if (BlockPos2 == null) continue;
-            return BlockPos2;
-        }
-        return null;
+    /** Moves the column of blocks directly beneath the player to the tail of {@code list}. */
+    private static void moveBelowFeetToEnd(List<BlockPos> list) {
+        BlockPos p = mc.player.getBlockPos();
+        List<BlockPos> below = list.stream()
+            .filter(pos -> pos.getX() == p.getX() && pos.getZ() == p.getZ() && pos.getY() < p.getY())
+            .sorted(Comparator.comparingInt(Vec3i::getY).reversed())
+            .toList();
+        list.removeAll(below);
+        list.addAll(below);
     }
 
-    private static boolean isInSchematicRegion(BlockPos BlockPos2, List<BlockPos[]> list) {
-        for (BlockPos[] BlockPosArray : list) {
-            if (BlockPos2.getX() < BlockPosArray[0].getX() || BlockPos2.getX() > BlockPosArray[1].getX() || BlockPos2.getY() < BlockPosArray[0].getY() || BlockPos2.getY() > BlockPosArray[1].getY() || BlockPos2.getZ() < BlockPosArray[0].getZ() || BlockPos2.getZ() > BlockPosArray[1].getZ()) continue;
-            return true;
+    /**
+     * True while KekMine is actively mining (or has queued) a block that lies inside the
+     * highway build footprint. HighwayBuilder/Handlers use this to avoid placing over a
+     * block the nuker is still clearing. (Was obfuscated {@code Q90GLXQ0Pef()}; note the
+     * sense is "busy", not "finished".)
+     */
+    public static boolean isBusyInBuildZone() { // was: Q90GLXQ0Pef()
+        WorldUtils.Direction8 dir = HighwayBuilder.getDirection();
+        if (dir == null) return false;
+
+        boolean isCardinal = dir == WorldUtils.Direction8.NORTH || dir == WorldUtils.Direction8.SOUTH
+            || dir == WorldUtils.Direction8.EAST || dir == WorldUtils.Direction8.WEST;
+        BlockPos[] zone = isCardinal ? BlockPositions.cardinalTunnel(0, 2) : BlockPositions.diagonalTunnel(0, 2);
+        Set<BlockPos> zoneSet = new HashSet<>(Arrays.asList(zone));
+
+        HighwayState state = HighwayState.getInstance();
+        HighwayLocator.Checkpoint detected = state.getCurrentCheckpoint();
+        if (detected != null && state.getCenterY() != null) {
+            int railY = state.getCenterY();
+            BlockPos[] railZone = isCardinal ? BlockPositions.cardinalFloor(0, 2, true, true)
+                                             : BlockPositions.diagonalFloor(0, 2, true, true);
+            for (BlockPos pos : railZone) {
+                if (pos.getY() == railY && HighwayLocator.isRailOnAnyHighway(pos, detected)) zoneSet.add(pos);
+            }
+        }
+
+        BlockPos p = KekMine.INSTANCE.getCurrentTarget();
+        if (p != null && zoneSet.contains(p)) return true;
+        p = KekMine.INSTANCE.getPendingTarget();
+        if (p != null && zoneSet.contains(p)) return true;
+        for (BlockPos pos : mineTargets) {
+            if (zoneSet.contains(pos)) return true;
         }
         return false;
     }
 
-    private static boolean isInSelection(BlockPos BlockPos2, ISelection[] iSelectionArray) {
-        for (ISelection iSelection : iSelectionArray) {
-            BetterBlockPos betterBlockPos = iSelection.min();
-            BetterBlockPos betterBlockPos2 = iSelection.max();
-            if (BlockPos2.getX() < betterBlockPos.getX() || BlockPos2.getX() > betterBlockPos2.getX() || BlockPos2.getY() < betterBlockPos.getY() || BlockPos2.getY() > betterBlockPos2.getY() || BlockPos2.getZ() < betterBlockPos.getZ() || BlockPos2.getZ() > betterBlockPos2.getZ()) continue;
-            return true;
-        }
-        return false;
-    }
-
-    private List<BlockPos> getAirFarmBlocks() {
-        ArrayList<BlockPos> arrayList = new ArrayList<BlockPos>();
-        if (KekNuker.mc.player == null || KekNuker.mc.world == null) {
-            return arrayList;
-        }
-        IBaritone iBaritone = BaritoneAPI.getProvider().getPrimaryBaritone();
-        ISelectionManager iSelectionManager = iBaritone.getSelectionManager();
-        if (iSelectionManager.getSelections() == null) {
-            return arrayList;
-        }
-        for (ISelection iSelection : iSelectionManager.getSelections()) {
-            BetterBlockPos betterBlockPos = iSelection.min();
-            BetterBlockPos betterBlockPos2 = iSelection.max();
-            int n = Math.min(betterBlockPos.getX(), betterBlockPos2.getX());
-            int n2 = Math.min(betterBlockPos.getY(), betterBlockPos2.getY());
-            int n3 = Math.min(betterBlockPos.getZ(), betterBlockPos2.getZ());
-            int n4 = Math.max(betterBlockPos.getX(), betterBlockPos2.getX());
-            int n5 = Math.max(betterBlockPos.getY(), betterBlockPos2.getY());
-            int n6 = Math.max(betterBlockPos.getZ(), betterBlockPos2.getZ());
-            int n7 = KekNuker.mc.player.getX();
-            int n8 = KekNuker.mc.player.getY();
-            int n9 = KekNuker.mc.player.getZ();
-            int n10 = Math.max(n, n7 - 12);
-            int n11 = Math.max(n2, n8 - 12);
-            int n12 = Math.max(n3, n9 - 12);
-            int n13 = Math.min(n4, n7 + 12);
-            int n14 = Math.min(n5, n8 + 12);
-            int n15 = Math.min(n6, n9 + 12);
-            if (n10 > n13 || n11 > n14 || n12 > n15) continue;
-            for (int i = n10; i <= n13; ++i) {
-                for (int j = n11; j <= n14; ++j) {
-                    for (int k = n12; k <= n15; ++k) {
-                        BlockPos BlockPos2 = new BlockPos(i, j, k);
-                        if (KekNuker.mc.world.getBlockState(BlockPos2).isAir() || KekNuker.mc.world.getBlockState(BlockPos2).isLiquid() || arrayList.contains(BlockPos2) || !WorldUtils.isWithinDistance(BlockPos2, (Double)this.range.get())) continue;
-                        arrayList.add(BlockPos2);
+    /** Collects breakable positions within {@code radius}, either as a cube or a sphere. */
+    private List<BlockPos> getBlocksInShape(Shape shape, double radius) { // was: FvaNWO(Shape,double)
+        List<BlockPos> positions = new ArrayList<>();
+        Vec3d eyePos = mc.player.getEyePos();
+        int blockRadius = (int) Math.ceil(radius);
+        for (int x = -blockRadius; x < blockRadius; x++) {
+            for (int y = -blockRadius; y < blockRadius; y++) {
+                for (int z = -blockRadius; z < blockRadius; z++) {
+                    BlockPos pos = BlockPos.ofFloored(eyePos.x + x, eyePos.y + y, eyePos.z + z);
+                    if (BlockUtils.canBreak(pos)) {
+                        if (shape == Shape.Sphere) {
+                            if (squaredDistanceToBox(eyePos, pos) <= radius * radius) positions.add(pos);
+                        } else if (shape == Shape.Cube) {
+                            positions.add(pos);
+                        }
                     }
                 }
             }
         }
-        return arrayList;
+        return positions;
+    }
+
+    /** Squared distance from {@code eye} to the nearest point of the block's AABB. */
+    static double squaredDistanceToBox(Vec3d eye, BlockPos pos) { // was: FvaNWO(Vec3d,BlockPos)
+        double cx = Math.max(pos.getX(), Math.min(eye.x, pos.getX() + 1.0));
+        double cy = Math.max(pos.getY(), Math.min(eye.y, pos.getY() + 1.0));
+        double cz = Math.max(pos.getZ(), Math.min(eye.z, pos.getZ() + 1.0));
+        double dx = eye.x - cx;
+        double dy = eye.y - cy;
+        double dz = eye.z - cz;
+        return dx * dx + dy * dy + dz * dz;
+    }
+
+    /** The block face nearest to the player's eye (used as the interaction side). */
+    public static Direction getClosestFace(Vec3d eye, BlockPos pos) { // was: Q90GLXQ0Pef(Vec3d,BlockPos)
+        double dx = eye.x - (pos.getX() + 0.5);
+        double dy = eye.y - (pos.getY() + 0.5);
+        double dz = eye.z - (pos.getZ() + 0.5);
+        double adx = Math.abs(dx);
+        double ady = Math.abs(dy);
+        double adz = Math.abs(dz);
+        if (adx >= ady && adx >= adz) {
+            return dx > 0.0 ? Direction.EAST : Direction.WEST;
+        } else if (ady >= adz) {
+            return dy > 0.0 ? Direction.UP : Direction.DOWN;
+        } else {
+            return dz > 0.0 ? Direction.SOUTH : Direction.NORTH;
+        }
+    }
+
+    /** Returns the {@code index}-th chunk on the square ring of the given {@code radius} around {@code center}. */
+    private ChunkPos getRingChunk(ChunkPos center, int radius, int index) { // was: FvaNWO(ChunkPos,int,int)
+        if (radius == 0) return center;
+        int cx = center.x;
+        int cz = center.z;
+        if (index < 2 * radius + 1) return new ChunkPos(cx - radius + index, cz - radius);
+        index -= 2 * radius + 1;
+        if (index < 2 * radius) return new ChunkPos(cx + radius, cz - radius + 1 + index);
+        index -= 2 * radius;
+        if (index < 2 * radius) return new ChunkPos(cx + radius - 1 - index, cz + radius);
+        index -= 2 * radius;
+        return new ChunkPos(cx - radius, cz + radius - 1 - index);
+    }
+
+    /** Finds the closest eligible breakable block within the given chunk, or null. */
+    private BlockPos findClosestBlockInChunk(ChunkPos chunk) { // was: FvaNWO(ChunkPos)
+        if (mc.world == null || mc.player == null) return null;
+        if (!mc.world.isChunkLoaded(chunk.x, chunk.z)) return null;
+
+        int minX = chunk.getStartX();
+        int maxX = chunk.getEndX();
+        int minZ = chunk.getStartZ();
+        int maxZ = chunk.getEndZ();
+        BlockPos closest = null;
+        double closestDist = Double.MAX_VALUE;
+        double px = mc.player.getX();
+        double py = mc.player.getY();
+        double pz = mc.player.getZ();
+
+        if (this.nukerMode.get() == NukerMode.Litematica) {
+            if (!LitematicaHelper.isLoaded()) return null;
+            int minY = mc.world.getBottomY();
+            int maxY = mc.world.getBottomY() + mc.world.getHeight() - 1;
+            for (BlockPos pos : LitematicaHelper.get()
+                .getWrongBlocksInBox(new BlockPos(minX, minY, minZ), new BlockPos(maxX, maxY, maxZ), !this.ignoreAir.get(), 64)) {
+                BlockState state = mc.world.getBlockState(pos);
+                if (this.isInLayer(pos)
+                    && BlockUtils.canBreak(pos)
+                    && (!this.avoidSpillingLiquids.get() || !WorldUtils.hasAdjacentLiquid(pos))
+                    && this.isAllowedByList(state)
+                    && this.hasSolidBelow(pos, 8)) {
+                    double dist = pos.getSquaredDistance(px, py, pz);
+                    if (dist < closestDist) {
+                        closestDist = dist;
+                        closest = pos;
+                    }
+                }
+            }
+        } else {
+            ISelection[] selections = null;
+            if (this.nukerMode.get() == NukerMode.Selection) {
+                selections = BaritoneAPI.getProvider().getPrimaryBaritone().getSelectionManager().getSelections();
+                if (selections == null || selections.length == 0) return null;
+            }
+
+            int feetY = mc.player.getBlockPos().getY();
+            int r = (int) Math.ceil(this.range.get());
+            int minY = this.layerType.get() == LayerType.AboveFeet ? feetY : Math.max(mc.world.getBottomY(), feetY - r);
+            int maxY = Math.min(mc.world.getBottomY() + mc.world.getHeight() - 1, feetY + r);
+            BlockPos.Mutable mpos = new BlockPos.Mutable();
+
+            for (int x = minX; x <= maxX; x++) {
+                for (int z = minZ; z <= maxZ; z++) {
+                    for (int y = minY; y <= maxY; y++) {
+                        mpos.set(x, y, z);
+                        BlockState state = mc.world.getBlockState(mpos);
+                        if (!state.isAir()
+                            && !state.isLiquid()
+                            && BlockUtils.canBreak(mpos)
+                            && (!this.avoidSpillingLiquids.get() || !WorldUtils.hasAdjacentLiquid(mpos))
+                            && this.isInLayer(mpos)
+                            && this.isAllowedByList(state)
+                            && (selections == null || isInSelection(mpos, selections))
+                            && this.hasSolidBelow(mpos, 8)) {
+                            double dist = mpos.getSquaredDistance(px, py, pz);
+                            if (dist < closestDist) {
+                                closestDist = dist;
+                                closest = mpos.toImmutable();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return closest;
+    }
+
+    /** Finds the nearest standable position (solid ground, within range) next to {@code candidate}. */
+    private BlockPos findStandPosition(BlockPos candidate) { // was: FvaNWO(BlockPos)
+        int playerY = mc.player.getBlockY();
+        int r = (int) Math.ceil(this.range.get());
+        double rangeSq = this.range.get() * this.range.get();
+        int dy = playerY - candidate.getY();
+        if (dy * dy > rangeSq) return null;
+
+        BlockPos best = null;
+        double bestDist = Double.MAX_VALUE;
+        BlockPos.Mutable standMut = new BlockPos.Mutable();
+        BlockPos.Mutable groundMut = new BlockPos.Mutable();
+
+        for (int dx = -r; dx <= r; dx++) {
+            for (int dz = -r; dz <= r; dz++) {
+                if (!(dx * dx + dy * dy + dz * dz > rangeSq)) {
+                    int sx = candidate.getX() + dx;
+                    int sz = candidate.getZ() + dz;
+                    groundMut.set(sx, playerY - 1, sz);
+                    BlockState ground = mc.world.getBlockState(groundMut);
+                    if (!ground.isAir() && !ground.isLiquid()) {
+                        standMut.set(sx, playerY, sz);
+                        double dist = standMut.getSquaredDistance(candidate);
+                        if (dist < bestDist) {
+                            bestDist = dist;
+                            best = standMut.toImmutable();
+                        }
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    /** True if there is a solid (non-air, non-liquid) block within {@code depth} blocks below {@code pos}. */
+    private boolean hasSolidBelow(BlockPos pos, int depth) { // was: FvaNWO(BlockPos,int)
+        int bottom = mc.world.getBottomY();
+        int x = pos.getX();
+        int z = pos.getZ();
+        BlockPos.Mutable check = new BlockPos.Mutable(x, 0, z);
+        for (int dy = 1; dy <= depth; dy++) {
+            int y = pos.getY() - dy;
+            if (y <= bottom) break;
+            check.set(x, y, z);
+            BlockState s = mc.world.getBlockState(check);
+            if (!s.isAir() && !s.isLiquid()) return true;
+        }
+        return false;
+    }
+
+    /** True if {@code pos} is allowed by the current {@link LayerType} restriction. */
+    private boolean isInLayer(BlockPos pos) { // was: Q90GLXQ0Pef(BlockPos)
+        if (this.layerType.get() == LayerType.AboveFeet && pos.getY() < mc.player.getBlockPos().getY()) return false;
+        return this.layerType.get() != LayerType.RenderLayer || !LitematicaHelper.isLoaded()
+            || LitematicaHelper.get().isPositionInRenderLayer(pos);
+    }
+
+    /** True if {@code state}'s block is allowed by the current white/blacklist. */
+    private boolean isAllowedByList(BlockState state) { // was: FvaNWO(BlockState)
+        if (this.listMode.get() == ListMode.Whitelist) return this.whitelist.get().contains(state.getBlock());
+        if (this.listMode.get() == ListMode.Blacklist) return !this.blacklist.get().contains(state.getBlock());
+        return true;
+    }
+
+    /** True if {@code pos} falls inside any Baritone selection box. */
+    private static boolean isInSelection(BlockPos pos, ISelection[] selections) { // was: FvaNWO(BlockPos,ISelection[])
+        for (ISelection sel : selections) {
+            BlockPos min = sel.min();
+            BlockPos max = sel.max();
+            if (pos.getX() >= min.getX() && pos.getX() <= max.getX()
+                && pos.getY() >= min.getY() && pos.getY() <= max.getY()
+                && pos.getZ() >= min.getZ() && pos.getZ() <= max.getZ()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Collects non-empty blocks within 12 blocks of the player that fall in any Baritone selection. */
+    private List<BlockPos> getSelectionBlocks() { // was: psJq59YIbp3Z()
+        List<BlockPos> list = new ArrayList<>();
+        if (mc.player == null || mc.world == null) return list;
+        IBaritone baritone = BaritoneAPI.getProvider().getPrimaryBaritone();
+        ISelectionManager selectionManager = baritone.getSelectionManager();
+        if (selectionManager.getSelections() == null) return list;
+
+        for (ISelection selection : selectionManager.getSelections()) {
+            BlockPos min = selection.min();
+            BlockPos max = selection.max();
+            int regionMinX = Math.min(min.getX(), max.getX());
+            int regionMinY = Math.min(min.getY(), max.getY());
+            int regionMinZ = Math.min(min.getZ(), max.getZ());
+            int regionMaxX = Math.max(min.getX(), max.getX());
+            int regionMaxY = Math.max(min.getY(), max.getY());
+            int regionMaxZ = Math.max(min.getZ(), max.getZ());
+            int px = mc.player.getBlockX();
+            int py = mc.player.getBlockY();
+            int pz = mc.player.getBlockZ();
+            int minX = Math.max(regionMinX, px - 12);
+            int minY = Math.max(regionMinY, py - 12);
+            int minZ = Math.max(regionMinZ, pz - 12);
+            int maxX = Math.min(regionMaxX, px + 12);
+            int maxY = Math.min(regionMaxY, py + 12);
+            int maxZ = Math.min(regionMaxZ, pz + 12);
+            if (minX <= maxX && minY <= maxY && minZ <= maxZ) {
+                for (int x = minX; x <= maxX; x++) {
+                    for (int y = minY; y <= maxY; y++) {
+                        for (int z = minZ; z <= maxZ; z++) {
+                            BlockPos pos = new BlockPos(x, y, z);
+                            if (!mc.world.getBlockState(pos).isAir()
+                                && !mc.world.getBlockState(pos).isLiquid()
+                                && !list.contains(pos)
+                                && WorldUtils.isWithinRange(pos, this.range.get())) {
+                                list.add(pos);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return list;
     }
 
     @EventHandler
-    private void onRender3D(Render3DEvent render3DEvent) {
-        if (KekNuker.mc.player == null || KekNuker.mc.world == null) {
-            return;
-        }
-        if (((Boolean)this.globalRendering.get()).booleanValue()) {
-            RenderUtils.mp3zoXQFKUKYj5(render3DEvent, this.breakQueue);
+    private void onRender(Render3DEvent event) { // was: FvaNWO(Render3DEvent)
+        if (mc.player == null || mc.world == null) return;
+        if (this.globalRendering.get()) {
+            RenderUtils.render(event, mineTargets);
         } else {
-            RenderUtils.jOdDDFXSeWl4(render3DEvent, this.breakQueue, (meteordevelopment.meteorclient.utils.render.color.Color)this.renderColor.get(), (meteordevelopment.meteorclient.utils.render.color.Color)this.renderColor.get(), ShapeMode.Lines);
+            RenderUtils.render(event, mineTargets, this.color.get(), this.color.get(), ShapeMode.Lines);
         }
     }
 
-    static {
-        targetBlocks = new ArrayList<BlockPos>();
-        TZa5O0xAoIaC = new HashMap<BlockPos, Integer>();
-    }
+    /** Layer restriction on where blocks may be broken. */ // was: enum LayerType {FvaNWO, Q90GLXQ0Pef, psJq59YIbp3Z}
+    private enum LayerType { All, AboveFeet, RenderLayer }
 
-    public static final class NukerMode
-    extends Enum<NukerMode> {
-        public static final /* enum */ NukerMode Normal = new NukerMode();
-        public static final /* enum */ NukerMode Highway = new NukerMode();
-        public static final /* enum */ NukerMode Litematica = new NukerMode();
-        public static final /* enum */ NukerMode AirFarm = new NukerMode();
-        private static final /* synthetic */ NukerMode[] V9ZG3sNvd2tk4bPq;
+    /** White/blacklist selection mode. */ // was: enum ListMode {FvaNWO, Q90GLXQ0Pef, psJq59YIbp3Z}
+    public enum ListMode { None, Whitelist, Blacklist }
 
-        public static NukerMode[] values() {
-            return (NukerMode[])V9ZG3sNvd2tk4bPq.clone();
-        }
+    /** Source of the blocks to mine. */ // was: enum NukerMode {FvaNWO, Q90GLXQ0Pef, psJq59YIbp3Z, SOYyh5IPg26f7F}
+    public enum NukerMode { Normal, Smart, Litematica, Selection }
 
-        public static NukerMode valueOf(String string) {
-            return Enum.valueOf(NukerMode.class, string);
-        }
+    /** Radius scan shape (Normal mode). */ // was: enum Shape {FvaNWO, Q90GLXQ0Pef}
+    public enum Shape { Cube, Sphere }
 
-        private static /* synthetic */ NukerMode[] bjcXSkBmj0OjqAf() {
-            return new NukerMode[]{Normal, Highway, Litematica, AirFarm};
-        }
-
-        static {
-            V9ZG3sNvd2tk4bPq = NukerMode.bjcXSkBmj0OjqAf();
-        }
-    }
-
-    public static final class Shape
-    extends Enum<Shape> {
-        public static final /* enum */ Shape Sphere = new Shape();
-        public static final /* enum */ Shape Cube = new Shape();
-        private static final /* synthetic */ Shape[] NUDC7Q4AxeSjEhHt;
-
-        public static Shape[] values() {
-            return (Shape[])NUDC7Q4AxeSjEhHt.clone();
-        }
-
-        public static Shape valueOf(String string) {
-            return Enum.valueOf(Shape.class, string);
-        }
-
-        private static /* synthetic */ Shape[] EXmTbeRB() {
-            return new Shape[]{Sphere, Cube};
-        }
-
-        static {
-            NUDC7Q4AxeSjEhHt = Shape.EXmTbeRB();
-        }
-    }
-
-    public static final class SortMode
-    extends Enum<SortMode> {
-        public static final /* enum */ SortMode None = new SortMode();
-        public static final /* enum */ SortMode Closest = new SortMode();
-        public static final /* enum */ SortMode Farthest = new SortMode();
-        public static final /* enum */ SortMode TopDown = new SortMode();
-        public static final /* enum */ SortMode BottomUp = new SortMode();
-        private static final /* synthetic */ SortMode[] JZDYaLhvUPKPZH;
-
-        public static SortMode[] values() {
-            return (SortMode[])JZDYaLhvUPKPZH.clone();
-        }
-
-        public static SortMode valueOf(String string) {
-            return Enum.valueOf(SortMode.class, string);
-        }
-
-        private static /* synthetic */ SortMode[] i09vexi4j0xa7Kn() {
-            return new SortMode[]{None, Closest, Farthest, TopDown, BottomUp};
-        }
-
-        static {
-            JZDYaLhvUPKPZH = SortMode.i09vexi4j0xa7Kn();
-        }
-    }
-
-    public static final class ListMode
-    extends Enum<ListMode> {
-        public static final /* enum */ ListMode All = new ListMode();
-        public static final /* enum */ ListMode Whitelist = new ListMode();
-        public static final /* enum */ ListMode Blacklist = new ListMode();
-        private static final /* synthetic */ ListMode[] XydsV5qWOWTk7gA;
-
-        public static ListMode[] values() {
-            return (ListMode[])XydsV5qWOWTk7gA.clone();
-        }
-
-        public static ListMode valueOf(String string) {
-            return Enum.valueOf(ListMode.class, string);
-        }
-
-        private static /* synthetic */ ListMode[] KMpX0B() {
-            return new ListMode[]{All, Whitelist, Blacklist};
-        }
-
-        static {
-            XydsV5qWOWTk7gA = ListMode.KMpX0B();
-        }
-    }
+    /** Order in which queued blocks are mined. */ // was: enum SortMode {FvaNWO, Q90GLXQ0Pef, psJq59YIbp3Z, SOYyh5IPg26f7F, rKbT3Ifwo}
+    public enum SortMode { None, Closest, Furthest, TopDown, BottomUp }
 }
-

@@ -1,4 +1,5 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// Class name was already readable; internal members were obfuscated.
 package musheor.modules.hud;
 
 import java.util.ArrayDeque;
@@ -12,139 +13,106 @@ import meteordevelopment.meteorclient.utils.render.color.Color;
 import musheor.musheor;
 import musheor.utils.system.MusheorSystem;
 
-public class HudInfoPlus
-extends HudElement {
-    public static final HudElementInfo<HudInfoPlus> INFO = new HudElementInfo(musheor.MUSHEOR_HUD, "packet-limits", "A hud module that displays how many packets you are sending to the server", HudInfoPlus::new);
-    private final Setting<Double> scale;
-    private static final Deque<Long> O3n0DkBJhp7 = new ArrayDeque<Long>();
-    private static final Deque<Long> Gc5AFJxsc3y = new ArrayDeque<Long>();
-    private static final Deque<Long> SMd0PdrY = new ArrayDeque<Long>();
+/**
+ * "packet-limits" HUD — tracks how many packets have been sent in sliding time windows and
+ * shows them against the configured limits: inventory and global packets over the last 4s,
+ * and interaction packets over the last ~310ms (limit 9). Colours each line green/yellow/red
+ * as it approaches its limit. The counters are fed by the packet-sending code (mixins).
+ */
+public class HudInfoPlus extends HudElement {
+    public static final HudElementInfo<HudInfoPlus> INFO = new HudElementInfo<>(
+        musheor.MUSHEOR_HUD, "packet-limits", "A hud module that displays how many packets you are sending to the server", HudInfoPlus::new);
+
+    private final Setting<Double> scale = this.settings.getDefaultGroup().add(new DoubleSetting.Builder().name("scale").defaultValue(1.0).build()); // was: FvaNWO
+
+    private static final Deque<Long> invPackets = new ArrayDeque<>();  // was: Q90GLXQ0Pef (inventory packet timestamps, 4s window)
+    private static final Deque<Long> packets = new ArrayDeque<>();     // was: psJq59YIbp3Z (global packet timestamps, 4s window)
+    private static final Deque<Long> sentPackets = new ArrayDeque<>(); // was: SOYyh5IPg26f7F (interaction packet timestamps, 310ms window)
 
     public HudInfoPlus() {
         super(INFO);
-        this.scale = this.settings.getDefaultGroup().add((Setting)((DoubleSetting.Builder)new DoubleSetting.Builder().name("scale")).defaultValue(1.0).build());
     }
 
-    /*
-     * WARNING - Removed try catching itself - possible behaviour change.
-     */
-    public static void yUTSjfYE2q2du() {
-        Deque<Long> deque = O3n0DkBJhp7;
-        synchronized (deque) {
-            O3n0DkBJhp7.addLast(System.currentTimeMillis());
-        }
+    /** Records an inventory packet. */
+    public static void recordInvPacket() { // was: FvaNWO()
+        synchronized (invPackets) { invPackets.addLast(System.currentTimeMillis()); }
     }
 
-    /*
-     * WARNING - Removed try catching itself - possible behaviour change.
-     */
-    public static void Y036W9pcsZhAYFUl() {
-        Deque<Long> deque = Gc5AFJxsc3y;
-        synchronized (deque) {
-            Gc5AFJxsc3y.addLast(System.currentTimeMillis());
-        }
+    /** Records a global packet. */
+    public static void recordPacket() { // was: Q90GLXQ0Pef()
+        synchronized (packets) { packets.addLast(System.currentTimeMillis()); }
     }
 
-    /*
-     * WARNING - Removed try catching itself - possible behaviour change.
-     */
-    public static void TfF42oD7() {
-        Deque<Long> deque = SMd0PdrY;
-        synchronized (deque) {
-            SMd0PdrY.addLast(System.currentTimeMillis());
-        }
+    /** Records an interaction packet. */
+    public static void recordSentPacket() { // was: psJq59YIbp3Z()
+        synchronized (sentPackets) { sentPackets.addLast(System.currentTimeMillis()); }
     }
 
-    /*
-     * WARNING - Removed try catching itself - possible behaviour change.
-     */
-    public static void tick() {
-        Long l;
-        long l2 = System.currentTimeMillis();
-        Deque<Long> deque = O3n0DkBJhp7;
-        synchronized (deque) {
-            while ((l = O3n0DkBJhp7.peekFirst()) != null && l2 - l > 4000L) {
-                O3n0DkBJhp7.pollFirst();
-            }
+    /** Drops timestamps that have fallen outside their window (inv/global: 4s, interaction: 310ms). */
+    public static void pruneExpired() { // was: SOYyh5IPg26f7F()
+        long now = System.currentTimeMillis();
+        Long first;
+        synchronized (invPackets) {
+            while ((first = invPackets.peekFirst()) != null && now - first > 4000L) invPackets.pollFirst();
         }
-        deque = Gc5AFJxsc3y;
-        synchronized (deque) {
-            while ((l = Gc5AFJxsc3y.peekFirst()) != null && l2 - l > 4000L) {
-                Gc5AFJxsc3y.pollFirst();
-            }
+        synchronized (packets) {
+            while ((first = packets.peekFirst()) != null && now - first > 4000L) packets.pollFirst();
         }
-        deque = SMd0PdrY;
-        synchronized (deque) {
-            l = SMd0PdrY.peekFirst();
-            if (l != null && l2 - l > 310L) {
-                SMd0PdrY.clear();
-            }
+        synchronized (sentPackets) {
+            first = sentPackets.peekFirst();
+            if (first != null && now - first > 310L) sentPackets.clear();
         }
     }
 
-    /*
-     * WARNING - Removed try catching itself - possible behaviour change.
-     */
-    public static int kBQdZKStLMVDV() {
-        Deque<Long> deque = O3n0DkBJhp7;
-        synchronized (deque) {
-            return O3n0DkBJhp7.size();
-        }
+    /** Inventory packets in the last 4 seconds. */
+    public static int getInvPacketCount() { // was: rKbT3Ifwo()
+        synchronized (invPackets) { return invPackets.size(); }
     }
 
-    /*
-     * WARNING - Removed try catching itself - possible behaviour change.
-     */
-    public static int XuSVOP3J5xFv() {
-        Deque<Long> deque = Gc5AFJxsc3y;
-        synchronized (deque) {
-            return Gc5AFJxsc3y.size();
-        }
+    /** Global packets in the last 4 seconds. */
+    public static int getPacketCount() { // was: r7hOYIKN2()
+        synchronized (packets) { return packets.size(); }
     }
 
-    /*
-     * WARNING - Removed try catching itself - possible behaviour change.
-     */
-    public static int Y1fGfDLuV() {
-        Deque<Long> deque = SMd0PdrY;
-        synchronized (deque) {
-            return SMd0PdrY.size();
-        }
+    /** Interaction packets in the last ~310ms. */
+    public static int getSentPacketCount() { // was: oZHMlTL()
+        synchronized (sentPackets) { return sentPackets.size(); }
     }
 
-    /*
-     * WARNING - void declaration
-     */
-    public void render(HudRenderer hudRenderer) {
-        void var13_17;
-        int n = HudInfoPlus.kBQdZKStLMVDV();
-        int n2 = HudInfoPlus.XuSVOP3J5xFv();
-        int n3 = HudInfoPlus.Y1fGfDLuV();
-        String[][] stringArrayArray = new String[][]{{"Inv", String.valueOf(n)}, {"Global", String.valueOf(n2)}, {"Int", String.valueOf(n3)}};
-        double d = hudRenderer.textHeight(true, ((Double)this.scale.get()).doubleValue());
-        double d2 = 0.0;
-        for (String[] color2 : stringArrayArray) {
-            double d3 = hudRenderer.textWidth(color2[0], true) + hudRenderer.textWidth(": ", true) + hudRenderer.textWidth(color2[1], true, ((Double)this.scale.get()).doubleValue());
-            d2 = Math.max(d2, d3);
+    @Override
+    public void render(HudRenderer renderer) {
+        int inventoryCount = getInvPacketCount();
+        int generalCount = getPacketCount();
+        int interactionCount = getSentPacketCount();
+        String[][] lines = {{"Inv", String.valueOf(inventoryCount)}, {"Global", String.valueOf(generalCount)}, {"Int", String.valueOf(interactionCount)}};
+        double lineHeight = renderer.textHeight(true, this.scale.get());
+        double width = 0.0;
+        for (String[] line : lines) {
+            double lineWidth = renderer.textWidth(line[0], true) + renderer.textWidth(": ", true) + renderer.textWidth(line[1], true, this.scale.get());
+            width = Math.max(width, lineWidth);
         }
-        this.setSize(d2, d * (double)stringArrayArray.length);
-        double d4 = this.y;
-        double d5 = this.x;
-        Color color3 = (double)n < (double)((Integer)MusheorSystem.Manager.invPacketLimit.get()).intValue() * 0.5 ? Color.GREEN : ((double)n < (double)((Integer)MusheorSystem.Manager.invPacketLimit.get()).intValue() * 0.8 ? Color.YELLOW : Color.RED);
-        if ((double)n2 < (double)((Integer)MusheorSystem.Manager.globalPacketLimit.get()).intValue() * 0.5) {
-            Color color = Color.GREEN;
-        } else if ((double)n2 < (double)((Integer)MusheorSystem.Manager.globalPacketLimit.get()).intValue() * 0.8) {
-            Color color = Color.YELLOW;
-        } else {
-            Color color = Color.RED;
-        }
-        Color color = (double)n3 < 4.5 ? Color.GREEN : ((double)n3 < 7.2 ? Color.YELLOW : Color.RED);
-        String string = String.format("global: %d/%d", n2, MusheorSystem.Manager.globalPacketLimit.get());
-        hudRenderer.text(string, d5, d4, (Color)var13_17, true, ((Double)this.scale.get()).doubleValue());
-        String string2 = String.format("inv: %d/%d", n, MusheorSystem.Manager.invPacketLimit.get());
-        hudRenderer.text(string2, d5, d4 += d, color3, true, ((Double)this.scale.get()).doubleValue());
-        String string3 = String.format("int: %d/%d", n3, 9);
-        hudRenderer.text(string3, d5, d4 += d, color, true, ((Double)this.scale.get()).doubleValue());
+        this.setSize(width, lineHeight * lines.length);
+
+        double y = this.y;
+        double x = this.x;
+        Color invColor = colorFor(inventoryCount, MusheorSystem.Manager.invPacketLimit.get());
+        Color globalColor = colorFor(generalCount, MusheorSystem.Manager.globalPacketLimit.get());
+        Color intColor;
+        if (interactionCount < 4.5) intColor = Color.GREEN;
+        else if (interactionCount < 7.2) intColor = Color.YELLOW;
+        else intColor = Color.RED;
+
+        renderer.text(String.format("global: %d/%d", generalCount, MusheorSystem.Manager.globalPacketLimit.get()), x, y, globalColor, true, this.scale.get());
+        y += lineHeight;
+        renderer.text(String.format("inv: %d/%d", inventoryCount, MusheorSystem.Manager.invPacketLimit.get()), x, y, invColor, true, this.scale.get());
+        y += lineHeight;
+        renderer.text(String.format("int: %d/%d", interactionCount, 9), x, y, intColor, true, this.scale.get());
+    }
+
+    /** Green below 50% of {@code limit}, yellow below 80%, red otherwise. */
+    private static Color colorFor(int count, int limit) {
+        if (count < limit * 0.5) return Color.GREEN;
+        if (count < limit * 0.8) return Color.YELLOW;
+        return Color.RED;
     }
 }
-

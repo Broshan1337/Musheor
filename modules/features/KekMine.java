@@ -1,7 +1,7 @@
-// Decompiled and deobfuscated from musheor-1.5 1.21.11.jar
+// Decompiled and deobfuscated from musheor-1.6.1 1.21.11.jar
+// Class name was already readable; internal members were obfuscated.
 package musheor.modules.features;
 
-import java.awt.Color;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import meteordevelopment.meteorclient.events.render.Render3DEvent;
@@ -14,385 +14,443 @@ import meteordevelopment.meteorclient.settings.SettingGroup;
 import meteordevelopment.meteorclient.systems.modules.Module;
 import meteordevelopment.meteorclient.systems.modules.Modules;
 import meteordevelopment.meteorclient.utils.Utils;
+import meteordevelopment.meteorclient.utils.render.color.Color;
 import meteordevelopment.meteorclient.utils.render.color.SettingColor;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
-import musheor.modules.automation.HighwayBuilder;
-import musheor.modules.automation.KekNuker;
 import musheor.musheor;
-import musheor.utils.InventoryManager;
+import musheor.modules.automation.HighwayBuilder;
+import musheor.modules.automation.InventoryManager;
+import musheor.modules.automation.KekNuker;
 import musheor.utils.RenderUtils;
 import musheor.utils.system.MusheorSystem;
 import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.BlockState;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.enchantment.Enchantments;
-import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.attribute.EntityAttributes;
 import net.minecraft.entity.effect.StatusEffectUtil;
 import net.minecraft.entity.effect.StatusEffects;
 import net.minecraft.item.ItemStack;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.network.packet.c2s.play.UpdateSelectedSlotC2SPacket;
-import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.tag.FluidTags;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Direction;
-import net.minecraft.world.BlockView;
 
-public class KekMine
-extends Module {
-    private static final MinecraftClient mc = MinecraftClient.getInstance();
-    private final SettingGroup sgRender;
-    public final Setting<Boolean> autoRebreak;
-    private final Setting<Boolean> silentSwap;
-    private final Setting<Boolean> globalRendering;
-    private final Setting<SettingColor> renderColor;
-    public static KekMine INSTANCE;
-    private MineContext primaryMine;
-    private MineContext secondaryMine;
-    public BlockPos lastBreakPos;
-    public final Deque<BlockPos> miningQueue;
+/**
+ * "KekMine" — a Grim-safe packet miner. Breaks blocks by sending
+ * START/STOP_DESTROY_BLOCK packets directly (rather than holding the pickaxe), with:
+ * an optional queue for extra targets, "double break" (mine two blocks at once by
+ * keeping a primary + secondary context), silent tool swaps, and auto-rebreak of the
+ * last block if it gets replaced. Timing/thresholds come from {@link MusheorSystem}.
+ */
+public class KekMine extends Module {
+    private static final MinecraftClient mc = MinecraftClient.getInstance(); // was: rKbT3Ifwo
+    private final SettingGroup sgRender = this.settings.createGroup("Render"); // was: r7hOYIKN2
+
+    public final Setting<Boolean> autoRebreak = this.settings.getDefaultGroup().add(new BoolSetting.Builder() // was: FvaNWO
+        .name("auto-rebreak").description("Automatically rebreak the last block in case it gets replaced").defaultValue(false).build());
+    private final Setting<Boolean> silentSwap = this.settings.getDefaultGroup().add(new BoolSetting.Builder() // was: oZHMlTL
+        .name("silent-swap").description("Breaks the block without holding the pickaxe").defaultValue(false).build());
+    private final Setting<Boolean> globalRendering = sgRender.add(new BoolSetting.Builder() // was: xQr5FhbwpQPWgIQ
+        .name("global-rendering").defaultValue(true).description("Synchronize rendering with Musheor-Tab").build());
+    private final Setting<SettingColor> color = sgRender.add(new ColorSetting.Builder() // was: OMMZL1F3q
+        .name("color").defaultValue(new SettingColor(Color.cyan)).description("Custom color for rendering (lines / wireframe)")
+        .visible(() -> !globalRendering.get()).build());
+
+    public static KekMine INSTANCE;                     // was: Q90GLXQ0Pef (static)
+    private MineContext primary;                        // was: zu3a44xDeMFMCRwm (block currently being mined)
+    private MineContext secondary;                      // was: krxNb5lcQuWA (second block, when double-break is on)
+    public BlockPos lastBrokenPos;                      // was: psJq59YIbp3Z (last completed break, for auto-rebreak)
+    public final Deque<BlockPos> mineQueue = new ArrayDeque<>(); // was: SOYyh5IPg26f7F
+    private int savedSlot = -1;                         // was: nt0HZnvBBp  (hotbar slot to restore after a silent swap)
+    private int slotRestoreTick = -1;                   // was: amz3UB1vE   (tick at which to restore savedSlot)
+    private int tickCounter = 0;                        // was: sBBIyQG5NWq0K
 
     public KekMine() {
         super(musheor.MAIN, "KekMine", "Grim-safe packet miner with queue and double break.");
-        this.sgRender = this.settings.createGroup("Render");
-        this.autoRebreak = this.settings.getDefaultGroup().add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("auto-rebreak")).description("Automatically rebreak the last block in case it gets replaced")).defaultValue((Object)false)).build());
-        this.silentSwap = this.settings.getDefaultGroup().add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("silent-swap")).description("Breaks the block without holding the pickaxe")).defaultValue((Object)false)).build());
-        this.globalRendering = this.sgRender.add((Setting)((BoolSetting.Builder)((BoolSetting.Builder)((BoolSetting.Builder)new BoolSetting.Builder().name("global-rendering")).defaultValue((Object)true)).description("Synchronize rendering with Musheor-Tab")).build());
-        this.renderColor = this.sgRender.add((Setting)((ColorSetting.Builder)((ColorSetting.Builder)((ColorSetting.Builder)new ColorSetting.Builder().name("color")).defaultValue(new SettingColor(Color.cyan)).description("Custom color for rendering (lines / wireframe)")).visible(() -> (Boolean)this.globalRendering.get() == false)).build());
-        this.miningQueue = new ArrayDeque<BlockPos>();
         INSTANCE = this;
     }
 
-    public void tryMineBlock(BlockPos pos) {
-        if (KekMine.mc.world == null) {
-            return;
-        }
-        if (!BlockUtils.canBreak((BlockPos)pos, (BlockState)KekMine.mc.world.getBlockState(pos))) {
-            return;
-        }
-        if (this.isOutOfRange(pos)) {
-            return;
-        }
-        if (this.isAlreadyMining(pos)) {
-            return;
-        }
-        this.queueBlock(pos, KekMine.mc.world.getBlockState(pos));
-    }
-
-    public boolean isAlreadyMining(BlockPos pos) {
-        if (this.primaryMine != null && this.primaryMine.pos.equals((Object)pos)) {
-            return true;
-        }
-        if (this.secondaryMine != null && this.secondaryMine.pos.equals((Object)pos)) {
-            return true;
-        }
-        return this.miningQueue.contains(pos);
-    }
-
-    public boolean isQueueActive() {
-        return this.primaryMine == null && this.secondaryMine == null && !this.miningQueue.isEmpty();
-    }
-
-    public static void startMining(BlockPos pos) {
-        if (INSTANCE.isAlreadyMining(pos)) {
-            return;
-        }
-        if (pos != null) {
-            MineContext mineContext = new MineContext(pos, KekMine.mc.world.getBlockState(pos), true);
-            KekMine.swapToTool(pos, KekMine.mc.world.getBlockState(pos));
-            INSTANCE.sendBreakPacket(pos);
-            INSTANCE.completeMining(mineContext, (Boolean)KekMine.INSTANCE.silentSwap.get());
+    /** Begins mining {@code pos} (fetching its state) if it is reachable and not already targeted. */
+    public void mine(BlockPos pos) { // was: FvaNWO(BlockPos)
+        if (mc.world != null && BlockUtils.canBreak(pos, mc.world.getBlockState(pos))
+            && !this.isOutOfRange(pos) && !this.isTargeting(pos)) {
+            this.mine(pos, mc.world.getBlockState(pos));
         }
     }
 
+    /** True if {@code pos} is the primary, secondary, or a queued target. */
+    public boolean isTargeting(BlockPos pos) { // was: Q90GLXQ0Pef(BlockPos)
+        if (this.primary != null && this.primary.pos.equals(pos)) return true;
+        if (this.secondary != null && this.secondary.pos.equals(pos)) return true;
+        return this.mineQueue.contains(pos);
+    }
+
+    /** True when no block is currently being mined but the queue still has work to pull. */
+    public boolean isReadyToDequeue() { // was: FvaNWO()
+        return this.primary == null && this.secondary == null && !this.mineQueue.isEmpty();
+    }
+
+    /** Statically begins mining {@code pos} from above. */
+    public static void breakBlock(BlockPos pos) { // was: psJq59YIbp3Z(BlockPos)
+        breakBlock(pos, Direction.UP);
+    }
+
+    /** Statically mines {@code pos} in a single call (start + immediate completion). */
+    public static void breakBlock(BlockPos pos, Direction dir) { // was: FvaNWO(BlockPos,Direction)
+        if (!INSTANCE.isTargeting(pos) && pos != null) {
+            MineContext ctx = new MineContext(pos, mc.world.getBlockState(pos), true);
+            if (!INSTANCE.silentSwap.get()) ensureBestTool(pos, mc.world.getBlockState(pos));
+            INSTANCE.sendStartMining(pos, dir);
+            INSTANCE.completeBreak(ctx, INSTANCE.silentSwap.get());
+        }
+    }
+
+    @Override
     public void onDeactivate() {
-        this.primaryMine = null;
-        this.secondaryMine = null;
-        this.miningQueue.clear();
-        this.lastBreakPos = null;
+        if (this.savedSlot >= 0) this.sendSlotUpdate(this.savedSlot);
+        this.primary = null;
+        this.secondary = null;
+        this.mineQueue.clear();
+        this.lastBrokenPos = null;
+        this.savedSlot = -1;
+        this.slotRestoreTick = -1;
+        this.tickCounter = 0;
     }
 
-    private static void swapToTool(BlockPos pos, BlockState state) {
-        if (!InventoryManager.getBestToolForBlock(state).isEmpty() && !((Boolean)KekMine.INSTANCE.silentSwap.get()).booleanValue()) {
-            InventoryManager.equipBestToolForBlock(pos);
+    /** Selects the best tool for {@code state} if it is not already in the main hand. */
+    private static void ensureBestTool(BlockPos pos, BlockState state) { // was: Q90GLXQ0Pef(BlockPos,BlockState)
+        if (mc.player.getMainHandStack() != InventoryManager.findBestTool(state)) {
+            InventoryManager.selectBestToolFor(pos);
         }
     }
 
-    public void queueBlock(BlockPos pos, BlockState state) {
-        if (this.isAlreadyMining(pos)) {
-            return;
-        }
-        if (HighwayBuilder.isEating()) {
-            return;
-        }
-        if (!(this.primaryMine == null || this.secondaryMine == null && ((Boolean)MusheorSystem.Manager.doubleBreak.get()).booleanValue())) {
-            if (!this.miningQueue.contains(pos)) {
-                this.miningQueue.addLast(pos);
+    /** Returns the hotbar slot (0-8) whose item mines {@code state} fastest. */
+    private int getBestToolSlot(BlockState state) { // was: FvaNWO(BlockState)
+        if (mc.player == null) return 0;
+        float bestSpeed = -1.0F;
+        int bestSlot = mc.player.getInventory().selectedSlot;
+        for (int i = 0; i < 9; i++) {
+            ItemStack stack = mc.player.getInventory().getStack(i);
+            float speed = stack.getMiningSpeedMultiplier(state);
+            if (speed > bestSpeed) {
+                bestSpeed = speed;
+                bestSlot = i;
             }
-            return;
         }
-        if (this.primaryMine == null) {
-            KekMine.swapToTool(pos, state);
-            this.primaryMine = new MineContext(pos, state, true);
-            this.sendBreakPacket(pos);
-        } else if (((Boolean)MusheorSystem.Manager.doubleBreak.get()).booleanValue() && this.secondaryMine == null) {
-            this.sendBlockAction(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, this.primaryMine.pos);
-            this.secondaryMine = new MineContext(this.primaryMine.pos, this.primaryMine.state, false);
-            this.primaryMine = new MineContext(pos, state, true);
-            this.sendBreakPacket(this.primaryMine.pos);
+        return bestSlot;
+    }
+
+    /** Begins mining {@code pos}/{@code state} from above. */
+    public void mine(BlockPos pos, BlockState state) { // was: FvaNWO(BlockPos,BlockState)
+        this.mine(pos, state, Direction.UP);
+    }
+
+    /**
+     * Begins mining {@code pos}. If a block is already being mined and double-break is on,
+     * the current primary is promoted to secondary and this becomes the new primary;
+     * otherwise the position is queued.
+     */
+    public void mine(BlockPos pos, BlockState state, Direction dir) { // was: FvaNWO(BlockPos,BlockState,Direction)
+        if (this.isTargeting(pos) || HighwayBuilder.isEating()) return;
+        if (this.primary == null || this.secondary == null && MusheorSystem.Manager.doubleBreak.get()) {
+            if (this.primary == null) {
+                if (!this.silentSwap.get()) ensureBestTool(pos, state);
+                this.primary = new MineContext(pos, state, true);
+                this.sendStartMining(pos, dir);
+            } else if (MusheorSystem.Manager.doubleBreak.get() && this.secondary == null) {
+                this.sendAction(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, this.primary.pos,
+                    KekNuker.getClosestFace(mc.player.getEyePos(), this.primary.pos));
+                long savedStartTime = this.primary.startTime;
+                this.secondary = new MineContext(this.primary.pos, this.primary.state, false);
+                this.secondary.startTime = savedStartTime;
+                this.primary = new MineContext(pos, state, true);
+                this.sendStartMining(this.primary.pos, dir);
+            }
+        } else if (!this.mineQueue.contains(pos)) {
+            this.mineQueue.addLast(pos);
         }
     }
 
     @EventHandler
-    private void onTick(TickEvent.Pre pre) {
-        if (KekMine.mc.player == null || KekMine.mc.world == null) {
-            return;
+    private void onTick(TickEvent.Pre event) { // was: FvaNWO(Pre)
+        if (mc.player == null || mc.world == null) return;
+        this.tickCounter++;
+        if (this.savedSlot >= 0 && this.tickCounter >= this.slotRestoreTick) {
+            this.sendSlotUpdate(this.savedSlot);
+            this.savedSlot = -1;
         }
-        if (HighwayBuilder.isEating()) {
-            this.primaryMine = null;
-            this.secondaryMine = null;
-            return;
-        }
-        if (this.lastBreakPos != null && ((Boolean)this.autoRebreak.get()).booleanValue() && this.primaryMine == null && this.secondaryMine == null && !KekMine.mc.world.getBlockState(this.lastBreakPos).isAir()) {
-            this.sendBreakWithSwap(new MineContext(this.lastBreakPos, KekMine.mc.world.getBlockState(this.lastBreakPos), false), (Boolean)this.silentSwap.get());
-            return;
-        }
-        this.cleanupStaleEntries();
-        if (this.secondaryMine != null && this.secondaryMine.getBreakProgress() >= 1.0) {
-            this.completeMining(this.secondaryMine, (Boolean)KekMine.INSTANCE.silentSwap.get());
-        }
-        if (this.primaryMine != null && this.primaryMine.getBreakProgress() >= 1.0) {
-            this.completeMining(this.primaryMine, (Boolean)KekMine.INSTANCE.silentSwap.get());
-        }
-        this.processQueue();
-    }
 
-    private void cleanupStaleEntries() {
-        if (this.primaryMine != null && this.shouldCancelMining(this.primaryMine.pos)) {
-            this.primaryMine = null;
-        }
-        if (this.secondaryMine != null && this.shouldCancelMining(this.secondaryMine.pos)) {
-            this.secondaryMine = null;
-        }
-        this.miningQueue.removeIf(this::shouldCancelMining);
-    }
+        if (HighwayBuilder.isEating() || mc.player.isUsingItem()) return;
 
-    private boolean shouldCancelMining(BlockPos pos) {
-        BlockState blockState = KekMine.mc.world.getBlockState(pos);
-        return blockState.isAir() || this.isOutOfRange(pos);
-    }
-
-    private void processQueue() {
-        if (this.miningQueue.isEmpty()) {
-            return;
-        }
-        if (this.primaryMine == null) {
-            BlockPos pos = this.miningQueue.pollFirst();
-            BlockState state = KekMine.mc.world.getBlockState(pos);
-            KekMine.swapToTool(pos, state);
-            this.primaryMine = new MineContext(pos, state, true);
-            this.sendBreakPacket(this.primaryMine.pos);
-        } else if (((Boolean)MusheorSystem.Manager.doubleBreak.get()).booleanValue() && this.secondaryMine == null) {
-            this.sendBlockAction(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, this.primaryMine.pos);
-            BlockPos pos2 = this.miningQueue.pollFirst();
-            BlockState state2 = KekMine.mc.world.getBlockState(pos2);
-            this.secondaryMine = new MineContext(this.primaryMine.pos, this.primaryMine.state, false);
-            this.primaryMine = new MineContext(pos2, state2, true);
-            this.sendBreakPacket(this.primaryMine.pos);
+        if (this.lastBrokenPos != null && this.autoRebreak.get()
+            && this.primary == null && this.secondary == null
+            && !mc.world.getBlockState(this.lastBrokenPos).isAir()) {
+            this.finishBreak(new MineContext(this.lastBrokenPos, mc.world.getBlockState(this.lastBrokenPos), false), this.silentSwap.get());
+        } else {
+            this.pumpQueue();
+            if (this.secondary != null && this.secondary.getProgress() >= 1.0) this.completeBreak(this.secondary, this.silentSwap.get());
+            if (this.primary != null && this.primary.getProgress() >= 1.0) this.completeBreak(this.primary, this.silentSwap.get());
+            this.pruneBrokenTargets();
         }
     }
 
-    private void sendBreakPacket(BlockPos pos) {
-        if (((Boolean)MusheorSystem.Manager.grimBypass.get()).booleanValue()) {
-            this.sendBlockAction(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos);
-        }
-        this.sendBlockAction(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, pos);
+    /** Drops finished/replaced positions from the primary, secondary, and queue. */
+    private void pruneBrokenTargets() { // was: SOYyh5IPg26f7F()
+        if (this.primary != null && this.isBrokenOrUnreachable(this.primary.pos)) this.primary = null;
+        if (this.secondary != null && this.isBrokenOrUnreachable(this.secondary.pos)) this.secondary = null;
+        this.mineQueue.removeIf(this::isBrokenOrUnreachable);
     }
 
-    private void sendBreakWithSwap(MineContext mineContext, boolean bl) {
-        int n;
-        boolean bl2;
-        if (KekMine.mc.world == null || KekMine.mc.player == null) {
-            return;
-        }
-        int n2 = KekMine.mc.player.getInventory().getSlotWithStack(InventoryManager.getBestToolForBlock(mineContext.state));
-        boolean bl3 = bl2 = n2 != (n = KekMine.mc.player.getInventory().selectedSlot);
-        if (bl && bl2) {
-            this.sendSlotPacket(n2);
-        }
-        this.sendBlockAction(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, mineContext.pos);
-        if (bl && bl2) {
-            this.sendSlotPacket(n);
-        }
+    /** True if {@code pos} is now air or out of reach. */
+    private boolean isBrokenOrUnreachable(BlockPos pos) { // was: rKbT3Ifwo(BlockPos)
+        BlockState state = mc.world.getBlockState(pos);
+        return state.isAir() || this.isOutOfRange(pos);
     }
 
-    private void completeMining(MineContext mineContext, boolean bl) {
-        int n;
-        if (KekMine.mc.world == null || KekMine.mc.player == null) {
-            return;
-        }
-        if (this.primaryMine != null) {
-            HighwayBuilder.onBlockMined(this.primaryMine.state);
-        }
-        if (this.secondaryMine != null) {
-            HighwayBuilder.onBlockMined(this.secondaryMine.state);
-        }
-        int n2 = KekMine.mc.player.getInventory().getSlotWithStack(InventoryManager.getBestToolForBlock(mineContext.state));
-        if (mineContext == this.secondaryMine && this.primaryMine != null && (n = KekMine.mc.player.getInventory().getSlotWithStack(InventoryManager.getBestToolForBlock(this.primaryMine.state))) != n2) {
-            n2 = n;
-        }
-        if (!mineContext.canInstaBreak) {
-            if (bl) {
-                InventoryManager.withHotbarSlot(n2, () -> this.sendBlockAction(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, mineContext.pos));
-            } else {
-                this.sendBlockAction(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, mineContext.pos);
-            }
-        } else if (bl) {
-            InventoryManager.withHotbarSlot(n2, null);
-        }
-        if ((mineContext.canInstaBreak || mineContext.isPrimary) && !((Boolean)MusheorSystem.Manager.validateBreak.get()).booleanValue()) {
-            KekMine.mc.world.syncWorldEvent(2001, mineContext.pos, Block.getRawIdFromState((BlockState)mineContext.state));
-            KekMine.mc.world.setBlockState(mineContext.pos, Blocks.AIR.getDefaultState(), 3);
-        }
-        this.lastBreakPos = mineContext.pos;
-        mineContext.active = false;
-        if (mineContext == this.primaryMine) {
-            this.primaryMine = null;
-        } else if (mineContext == this.secondaryMine) {
-            this.secondaryMine = null;
+    /** Pulls the next position(s) from the queue into the primary/secondary contexts. */
+    private void pumpQueue() { // was: rKbT3Ifwo()
+        if (this.mineQueue.isEmpty()) return;
+        if (this.primary == null) {
+            BlockPos pos = this.mineQueue.pollFirst();
+            BlockState state = mc.world.getBlockState(pos);
+            if (!this.silentSwap.get()) ensureBestTool(pos, state);
+            this.primary = new MineContext(pos, state, true);
+            this.sendStartMining(this.primary.pos, KekNuker.getClosestFace(mc.player.getEyePos(), this.primary.pos));
+        } else if (MusheorSystem.Manager.doubleBreak.get() && this.secondary == null) {
+            this.sendAction(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, this.primary.pos,
+                KekNuker.getClosestFace(mc.player.getEyePos(), this.primary.pos));
+            BlockPos nextPos = this.mineQueue.pollFirst();
+            BlockState nextState = mc.world.getBlockState(nextPos);
+            long savedStartTime = this.primary.startTime;
+            this.secondary = new MineContext(this.primary.pos, this.primary.state, false);
+            this.secondary.startTime = savedStartTime;
+            this.primary = new MineContext(nextPos, nextState, true);
+            this.sendStartMining(this.primary.pos, KekNuker.getClosestFace(mc.player.getEyePos(), this.primary.pos));
         }
     }
 
-    public void sendBlockAction(PlayerActionC2SPacket.Action actionType, BlockPos pos) {
-        if (KekMine.mc.interactionManager == null || KekMine.mc.world == null) {
-            return;
+    /** Sends the START_DESTROY_BLOCK packet (preceded by a STOP for Grim's bypass). */
+    private void sendStartMining(BlockPos pos, Direction dir) { // was: Q90GLXQ0Pef(BlockPos,Direction)
+        if (MusheorSystem.Manager.grimBypass.get()) {
+            this.sendAction(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, pos, dir);
         }
-        KekMine.mc.interactionManager.sendSequencedPacket(KekMine.mc.world, n -> new PlayerActionC2SPacket(actionType, pos, Direction.UP, n));
+        this.sendAction(PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, pos, dir);
     }
 
-    public void sendSlotPacket(int n) {
-        if (KekMine.mc.interactionManager == null || KekMine.mc.world == null || n < 0) {
-            return;
-        }
-        KekMine.mc.interactionManager.sendSequencedPacket(KekMine.mc.world, n2 -> new UpdateSelectedSlotC2SPacket(n));
+    /** Sends a finishing STOP_DESTROY_BLOCK for {@code ctx} (used by auto-rebreak), swapping tools if silent. */
+    private void finishBreak(MineContext ctx, boolean silent) { // was: FvaNWO(MineContext,boolean)
+        if (mc.world == null || mc.player == null) return;
+        Direction dir = KekNuker.getClosestFace(mc.player.getEyePos(), ctx.pos);
+        int prevSlot = this.savedSlot >= 0 ? this.savedSlot : mc.player.getInventory().selectedSlot;
+        int bestSlot = silent ? this.getBestToolSlot(ctx.state) : prevSlot;
+        boolean needSwap = silent && bestSlot != prevSlot;
+        if (needSwap) this.sendSlotUpdate(bestSlot);
+        this.sendAction(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, ctx.pos, dir);
+        if (needSwap) this.scheduleSlotRestore(prevSlot);
     }
 
-    public boolean isOutOfRange(BlockPos pos) {
-        return !(KekMine.mc.player.getEyePos().distanceTo(pos.toCenterPos()) <= (Double)((KekNuker)Modules.get().get(KekNuker.class)).range.get() + 0.5);
+    /** Completes a break: notifies stats, sends STOP, optionally clears the block locally, and frees the context. */
+    private void completeBreak(MineContext ctx, boolean silent) { // was: Q90GLXQ0Pef(MineContext,boolean)
+        if (mc.world == null || mc.player == null) return;
+        if (this.primary != null) HighwayBuilder.countBrokenBlock(this.primary.state);
+        if (this.secondary != null) HighwayBuilder.countBrokenBlock(this.secondary.state);
+
+        Direction dir = KekNuker.getClosestFace(mc.player.getEyePos(), ctx.pos);
+        int prevSlot = this.savedSlot >= 0 ? this.savedSlot : mc.player.getInventory().selectedSlot;
+        int bestSlot = silent ? this.getBestToolSlot(ctx.state) : prevSlot;
+        // When finishing the secondary while a primary is still active, keep the primary's tool selected.
+        if (silent && ctx == this.secondary && this.primary != null) {
+            int primaryBest = this.getBestToolSlot(this.primary.state);
+            if (primaryBest != bestSlot) bestSlot = primaryBest;
+        }
+
+        boolean needSwap = silent && bestSlot != prevSlot;
+        if (!ctx.instaBreak) {
+            if (needSwap) this.sendSlotUpdate(bestSlot);
+            this.sendAction(PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, ctx.pos, dir);
+        } else if (needSwap) {
+            this.sendSlotUpdate(bestSlot);
+        }
+
+        if (needSwap) this.scheduleSlotRestore(prevSlot);
+
+        // Instant / threshold-reached blocks: clear locally without waiting for the server ack.
+        if ((ctx.instaBreak || ctx.reachedThreshold) && !MusheorSystem.Manager.validateBreak.get()) {
+            mc.world.syncWorldEvent(2001, ctx.pos, Block.getRawIdFromState(ctx.state));
+            mc.world.setBlockState(ctx.pos, Blocks.AIR.getDefaultState(), 3);
+        }
+
+        this.lastBrokenPos = ctx.pos;
+        ctx.active = false;
+        if (ctx == this.primary) this.primary = null;
+        else if (ctx == this.secondary) this.secondary = null;
+    }
+
+    /** Restores {@code prevSlot} now, or schedules it {@code holdTicks} ticks out. */
+    private void scheduleSlotRestore(int prevSlot) {
+        int hold = MusheorSystem.Manager.holdTicks.get();
+        if (hold > 0) {
+            this.savedSlot = prevSlot;
+            this.slotRestoreTick = this.tickCounter + hold;
+        } else {
+            this.sendSlotUpdate(prevSlot);
+            this.savedSlot = -1;
+        }
+    }
+
+    /** Sends an UpdateSelectedSlot packet without changing the visible client-side slot. */
+    private void sendSlotUpdate(int slot) { // was: FvaNWO(int)
+        if (mc.getNetworkHandler() != null) mc.getNetworkHandler().sendPacket(new UpdateSelectedSlotC2SPacket(slot));
+    }
+
+    /** Sends a player action packet targeting {@code pos} from above. */
+    public void sendAction(PlayerActionC2SPacket.Action action, BlockPos pos) { // was: FvaNWO(Action,BlockPos)
+        this.sendAction(action, pos, Direction.UP);
+    }
+
+    /** Sends a sequenced player action packet targeting {@code pos} on face {@code dir}. */
+    public void sendAction(PlayerActionC2SPacket.Action action, BlockPos pos, Direction dir) { // was: FvaNWO(Action,BlockPos,Direction)
+        if (mc.interactionManager != null && mc.world != null) {
+            mc.interactionManager.sendSequencedPacket(mc.world, sequence -> new PlayerActionC2SPacket(action, pos, dir, sequence));
+        }
+    }
+
+    /** True if {@code pos} lies beyond the KekNuker range (+1) from the player's eyes. */
+    public boolean isOutOfRange(BlockPos pos) { // was: SOYyh5IPg26f7F(BlockPos)
+        return mc.player.getEyePos().distanceTo(pos.toCenterPos())
+            > ((KekNuker) Modules.get().get(KekNuker.class)).range.get() + 1.0;
+    }
+
+    /** The block currently being mined (primary), or null. */
+    public BlockPos getCurrentTarget() { // was: Q90GLXQ0Pef()
+        return this.primary != null ? this.primary.pos : null;
+    }
+
+    /** The second block being mined (double-break), or null. */
+    public BlockPos getPendingTarget() { // was: psJq59YIbp3Z()
+        return this.secondary != null ? this.secondary.pos : null;
     }
 
     @EventHandler
-    private void onRender(Render3DEvent render3DEvent) {
-        if (KekMine.mc.player == null || KekMine.mc.world == null) {
-            return;
-        }
-        if (!((KekNuker)Modules.get().get(KekNuker.class)).isActive()) {
-            if (((Boolean)this.globalRendering.get()).booleanValue()) {
-                RenderUtils.mp3zoXQFKUKYj5(render3DEvent, this.miningQueue.stream().toList());
+    private void onRender(Render3DEvent event) { // was: FvaNWO(Render3DEvent)
+        if (mc.player == null || mc.world == null) return;
+
+        if (!((KekNuker) Modules.get().get(KekNuker.class)).isActive()) {
+            if (this.globalRendering.get()) {
+                RenderUtils.render(event, this.mineQueue.stream().toList());
             } else {
-                RenderUtils.jOdDDFXSeWl4(render3DEvent, this.miningQueue.stream().toList(), meteordevelopment.meteorclient.utils.render.color.Color.WHITE, meteordevelopment.meteorclient.utils.render.color.Color.WHITE, ShapeMode.Lines);
+                RenderUtils.render(event, this.mineQueue.stream().toList(), Color.WHITE, Color.WHITE, ShapeMode.Lines);
             }
         }
-        if (this.secondaryMine != null) {
-            if (((Boolean)this.globalRendering.get()).booleanValue()) {
-                this.renderMineContext(render3DEvent, this.secondaryMine, (meteordevelopment.meteorclient.utils.render.color.Color)MusheorSystem.Manager.renderSideColor.get(), (meteordevelopment.meteorclient.utils.render.color.Color)MusheorSystem.Manager.renderLineColor.get(), (ShapeMode)MusheorSystem.Manager.renderShape.get());
+
+        if (this.secondary != null) renderContext(event, this.secondary);
+        if (this.primary != null) renderContext(event, this.primary);
+
+        if (this.lastBrokenPos != null && this.autoRebreak.get() && !mc.world.getBlockState(this.lastBrokenPos).isAir()) {
+            if (this.globalRendering.get()) {
+                RenderUtils.render(event, this.lastBrokenPos, mc.world.getBlockState(this.lastBrokenPos).getBlock());
             } else {
-                this.renderMineContext(render3DEvent, this.secondaryMine, (meteordevelopment.meteorclient.utils.render.color.Color)this.renderColor.get(), (meteordevelopment.meteorclient.utils.render.color.Color)this.renderColor.get(), ShapeMode.Lines);
-            }
-        }
-        if (this.primaryMine != null) {
-            if (((Boolean)this.globalRendering.get()).booleanValue()) {
-                this.renderMineContext(render3DEvent, this.primaryMine, (meteordevelopment.meteorclient.utils.render.color.Color)MusheorSystem.Manager.renderSideColor.get(), (meteordevelopment.meteorclient.utils.render.color.Color)MusheorSystem.Manager.renderLineColor.get(), (ShapeMode)MusheorSystem.Manager.renderShape.get());
-            } else {
-                this.renderMineContext(render3DEvent, this.primaryMine, (meteordevelopment.meteorclient.utils.render.color.Color)this.renderColor.get(), (meteordevelopment.meteorclient.utils.render.color.Color)this.renderColor.get(), ShapeMode.Lines);
-            }
-        }
-        if (this.lastBreakPos != null && ((Boolean)this.autoRebreak.get()).booleanValue() && !KekMine.mc.world.getBlockState(this.lastBreakPos).isAir()) {
-            if (((Boolean)this.globalRendering.get()).booleanValue()) {
-                RenderUtils.jOdDDFXSeWl4(render3DEvent, this.lastBreakPos, KekMine.mc.world.getBlockState(this.lastBreakPos).getBlock());
-            } else {
-                RenderUtils.jOdDDFXSeWl4(render3DEvent, this.lastBreakPos, (meteordevelopment.meteorclient.utils.render.color.Color)this.renderColor.get(), (meteordevelopment.meteorclient.utils.render.color.Color)this.renderColor.get(), ShapeMode.Lines);
+                RenderUtils.render(event, this.lastBrokenPos, this.color.get(), this.color.get(), ShapeMode.Lines);
             }
         }
     }
 
-    private void renderMineContext(Render3DEvent render3DEvent, MineContext mineContext, meteordevelopment.meteorclient.utils.render.color.Color color, meteordevelopment.meteorclient.utils.render.color.Color color2, ShapeMode shapeMode) {
-        double d = (1.0 - mineContext.getBreakProgress()) / 2.0;
-        Box box = new Box((double)mineContext.pos.getX() + d, (double)mineContext.pos.getY() + d, (double)mineContext.pos.getZ() + d, (double)mineContext.pos.getX() + 1.0 - d, (double)mineContext.pos.getY() + 1.0 - d, (double)mineContext.pos.getZ() + 1.0 - d);
-        render3DEvent.renderer.box(box, color, color2, shapeMode, 0);
+    /** Renders a single mining context, honouring the global-rendering toggle. */
+    private void renderContext(Render3DEvent event, MineContext ctx) {
+        if (this.globalRendering.get()) {
+            this.renderProgress(event, ctx, MusheorSystem.Manager.renderSideColor.get(),
+                MusheorSystem.Manager.renderLineColor.get(), MusheorSystem.Manager.renderShape.get());
+        } else {
+            this.renderProgress(event, ctx, this.color.get(), this.color.get(), ShapeMode.Lines);
+        }
     }
 
+    /** Draws a break box for {@code ctx} that shrinks toward its centre as progress approaches 1. */
+    private void renderProgress(Render3DEvent event, MineContext ctx, Color side, Color line, ShapeMode shape) { // was: FvaNWO(event,MineContext,Color,Color,ShapeMode)
+        double offset = (1.0 - ctx.getProgress()) / 2.0;
+        Box box = new Box(
+            ctx.pos.getX() + offset, ctx.pos.getY() + offset, ctx.pos.getZ() + offset,
+            ctx.pos.getX() + 1.0 - offset, ctx.pos.getY() + 1.0 - offset, ctx.pos.getZ() + 1.0 - offset);
+        event.renderer.box(box, side, line, shape, 0);
+    }
+
+    /**
+     * A single block being mined. Tracks the block, its start time, and precomputed flags
+     * ({@code instaBreak}, {@code reachedThreshold}) so progress can be estimated client-side.
+     */
     public static class MineContext {
-        public final BlockPos pos;
-        public final BlockState state;
-        public long breakStartTime;
-        public final float hardness;
-        public boolean active = true;
-        public final boolean isAttack;
-        public final boolean canInstaBreak;
-        public final boolean isPrimary;
-        public final MinecraftClient mc = MinecraftClient.getInstance();
+        public final BlockPos pos;               // was: FvaNWO
+        public final BlockState state;           // was: Q90GLXQ0Pef
+        public long startTime;                   // was: psJq59YIbp3Z
+        public final float hardness;             // was: SOYyh5IPg26f7F
+        public boolean active = true;            // was: rKbT3Ifwo
+        public final boolean isPrimary;          // was: r7hOYIKN2
+        public final boolean instaBreak;         // was: oZHMlTL       (can be broken instantly)
+        public final boolean reachedThreshold;   // was: xQr5FhbwpQPWgIQ (estimated progress already >= break threshold)
+        public final MinecraftClient mc = MinecraftClient.getInstance(); // was: OMMZL1F3q
 
-        public MineContext(BlockPos pos, BlockState state, boolean bl) {
+        public MineContext(BlockPos pos, BlockState state, boolean isPrimary) {
             this.pos = pos.toImmutable();
             this.state = state;
-            this.hardness = state.getHardness((BlockView)this.mc.world, pos);
-            this.isAttack = bl;
-            this.breakStartTime = System.currentTimeMillis();
-            this.canInstaBreak = BlockUtils.canInstaBreak((BlockPos)pos);
-            this.isPrimary = (double)this.getBreakSpeed() / (Double)MusheorSystem.Manager.breakThreshold.get() >= 1.0;
+            this.hardness = state.getHardness(this.mc.world, pos);
+            this.isPrimary = isPrimary;
+            this.startTime = System.currentTimeMillis();
+            this.instaBreak = BlockUtils.canInstaBreak(pos);
+            this.reachedThreshold = this.miningSpeedPerTick() / MusheorSystem.Manager.breakThreshold.get() >= 1.0;
         }
 
-        private float getBreakSpeed() {
-            float f;
-            float f2 = this.state.getHardness((BlockView)this.mc.world, this.pos);
-            ItemStack ItemStack2 = InventoryManager.getBestToolForBlock(this.state);
-            int n = !this.state.isToolRequired() || ItemStack2.isSuitableFor(this.state) ? 30 : 100;
-            float f3 = this.mc.player.getBlockBreakingSpeed(this.state);
-            if (ItemStack2 != null && !ItemStack2.isEmpty() && (f = ItemStack2.getMiningSpeedMultiplier(this.state)) > 1.0f) {
-                f3 = f;
-                int n2 = Utils.getEnchantmentLevel((ItemStack)ItemStack2, (RegistryKey)Enchantments.EFFICIENCY);
-                if (n2 > 0 && !ItemStack2.isEmpty()) {
-                    f3 += (float)(n2 * n2 + 1);
+        /** Fraction of the block broken per tick, replicating vanilla mining-speed maths. */
+        private float miningSpeedPerTick() { // was: FvaNWO()
+            float hardness = this.state.getHardness(this.mc.world, this.pos);
+            ItemStack bestTool = InventoryManager.findBestTool(this.state);
+            int divisor = this.state.isToolRequired() && !bestTool.isSuitableFor(this.state) ? 100 : 30;
+            float speed = this.mc.player.getBlockBreakingSpeed(this.state);
+            if (bestTool != null && !bestTool.isEmpty()) {
+                float multiplier = bestTool.getMiningSpeedMultiplier(this.state);
+                if (multiplier > 1.0F) {
+                    speed = multiplier;
+                    int efficiency = Utils.getEnchantmentLevel(bestTool, Enchantments.EFFICIENCY);
+                    if (efficiency > 0 && !bestTool.isEmpty()) speed += efficiency * efficiency + 1;
                 }
             }
-            if (StatusEffectUtil.hasHaste((LivingEntity)this.mc.player)) {
-                f3 *= 1.0f + (float)(StatusEffectUtil.getHasteAmplifier((LivingEntity)this.mc.player) + 1) * 0.2f;
+
+            if (StatusEffectUtil.hasHaste(this.mc.player)) {
+                speed *= 1.0F + (StatusEffectUtil.getHasteAmplifier(this.mc.player) + 1) * 0.2F;
             }
+
             if (this.mc.player.hasStatusEffect(StatusEffects.MINING_FATIGUE)) {
-                f = switch (this.mc.player.getStatusEffect(StatusEffects.MINING_FATIGUE).getAmplifier()) {
-                    case 0 -> 0.3f;
-                    case 1 -> 0.09f;
-                    case 2 -> 0.0027f;
-                    default -> 8.1E-4f;
+                float f = switch (this.mc.player.getStatusEffect(StatusEffects.MINING_FATIGUE).getAmplifier()) {
+                    case 0 -> 0.3F;
+                    case 1 -> 0.09F;
+                    case 2 -> 0.0027F;
+                    default -> 8.1E-4F;
                 };
-                f3 *= f;
+                speed *= f;
             }
+
             if (this.mc.player.isSubmergedIn(FluidTags.WATER)) {
-                f3 *= (float)this.mc.player.getAttributeValue(EntityAttributes.SUBMERGED_MINING_SPEED);
+                speed *= (float) this.mc.player.getAttributeValue(EntityAttributes.SUBMERGED_MINING_SPEED);
             }
-            if (!this.mc.player.isOnGround()) {
-                f3 /= 5.0f;
-            }
-            return f3 / f2 / (float)n;
+
+            if (!this.mc.player.isOnGround()) speed /= 5.0F;
+
+            return speed / hardness / divisor;
         }
 
-        double getBreakProgress() {
-            if (this.mc.player == null || this.mc.world == null || this.hardness < 0.0f) {
-                return 0.0;
-            }
-            float f = this.getBreakSpeed();
-            if (f <= 0.0f) {
-                return 2.147483647E9;
-            }
-            float f2 = Math.max((float)(System.currentTimeMillis() - this.breakStartTime) / 50.0f + 1.0f, 1.0f);
-            float f3 = f * f2;
-            float f4 = this.isAttack ? ((Double)MusheorSystem.Manager.breakThreshold.get()).floatValue() : 1.0f;
-            return Math.min((double)(f3 / f4), 1.0);
+        /** Estimated break progress in [0, 1], scaled by the configured break threshold for the primary. */
+        private double getProgress() { // was: Q90GLXQ0Pef()
+            if (this.mc.player == null || this.mc.world == null || this.hardness < 0.0F) return 0.0;
+            float perTick = this.miningSpeedPerTick();
+            if (perTick <= 0.0F) return 2.147483647E9;
+            float elapsedTicks = Math.max((float) (System.currentTimeMillis() - this.startTime) / 50.0F + 1.0F, 1.0F);
+            float currentProgress = perTick * elapsedTicks;
+            float targetProgress = this.isPrimary ? MusheorSystem.Manager.breakThreshold.get().floatValue() : 1.0F;
+            return Math.min(currentProgress / targetProgress, 1.0);
         }
     }
 }
