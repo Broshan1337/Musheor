@@ -1,4 +1,4 @@
-# Deobfuscation map — musheor-1.6.1
+# Deobfuscation map - musheor-1.6.1
 
 Raw Vineflower output: `../decompiled-v2/`
 Cleaned/deobfuscated source: this folder (`clean-v2/`)
@@ -37,8 +37,8 @@ Members (methods/fields/locals) are renamed per-file during deobfuscation.
 | `SyqMxK` | `RateController` | `musheor/utils/internal/RateController.java` |
 | `ttI5` | `StatsCollector` (reads MC stats → HighwayState) | `musheor/utils/StatsCollector.java` |
 
-## Common obfuscated member names (context-dependent — same token reused across unrelated classes)
-- `FvaNWO`, `Q90GLXQ0Pef`, `psJq59YIbp3Z`, `oZHMlTL`, `rKbT3Ifwo`, `SOYyh5IPg26f7F` … —
+## Common obfuscated member names (context-dependent - same token reused across unrelated classes)
+- `FvaNWO`, `Q90GLXQ0Pef`, `psJq59YIbp3Z`, `oZHMlTL`, `rKbT3Ifwo`, `SOYyh5IPg26f7F` …  -
   these are per-class member slots; each is renamed from its behavior in-file.
 
 ## HighwayBuilder (musheor/modules/automation/HighwayBuilder.java) member map
